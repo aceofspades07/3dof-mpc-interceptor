@@ -18,6 +18,7 @@ class ArmParameters:
     dq_max: np.ndarray = np.array([2.0, 2.0])  # rad/s
     ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
     torque_limits: np.ndarray = np.array([100.0, 100.0])  # Nm
+    config : str = "ELBOW_DOWN"
     control_mode: str = "POSITION"  # "POSITION" or "VELOCITY"
 
 class ArmDynamics:
@@ -63,7 +64,12 @@ class ArmDynamics:
         sin_q2 = np.sqrt(1 - cos_q2**2)
         sin_q2 = np.clip(sin_q2, -1.0, 1.0)  # Numerical safety
 
-        q2 = np.arctan2(sin_q2, cos_q2)
+        q2_mag = np.arctan2(sin_q2, cos_q2)
+
+        if self.params.config == "ELBOW_UP":
+            q2 = -q2_mag # Elbow Up
+        elif self.params.config == "ELBOW_DOWN":
+            q2 = q2_mag # Elbow Down
 
         k1 = l1 + l2 * cos_q2
         k2 = l2 * sin_q2
@@ -130,22 +136,19 @@ slid_target_z = p.addUserDebugParameter("Target Z", -1*max_reach, max_reach, max
 # 6. Simulation Loop
 while True:
     # Read slider values
-    """
-    target_pos_1 = p.readUserDebugParameter(param_ids[0]) # Replace this with the calculated target from high-level controller
-    target_pos_2 = p.readUserDebugParameter(param_ids[1]) # Replace this with the calculated target from high-level controller
-    """
+    
     target_pos = p.readUserDebugParameter(slid_target_x) , p.readUserDebugParameter(slid_target_z) 
 
     dynamics = ArmDynamics(arm_params)
-    ik_angles =  dynamics.ik_solver(target_pos)
+    target_angles =  dynamics.ik_solver(target_pos)
 
-    if ik_angles is not None:
+    if target_angles is not None:
         
         p.setJointMotorControlArray(
             robot_id,
             joint_ids,
             p.POSITION_CONTROL,
-            targetPositions=ik_angles,
+            targetPositions=target_angles,
             forces=arm_params.torque_limits
         )
     else:
@@ -159,7 +162,7 @@ while True:
             robot_id,
             joint_ids,
             p.POSITION_CONTROL,
-            targetPositions=ik_angles
+            targetPositions=target_angles
         )
     
 
@@ -170,8 +173,8 @@ while True:
             robot_id,
             joint_ids,
             p.VELOCITY_CONTROL,
-            targetVelocities=[Kp[0] * (ik_angles[0] - p.getJointState(robot_id, joint_ids[0])[0]),
-                            Kp[1] * (ik_angles[1] - p.getJointState(robot_id, joint_ids[1])[0])]
+            targetVelocities=[Kp[0] * (target_angles[0] - p.getJointState(robot_id, joint_ids[0])[0]),
+                            Kp[1] * (target_angles[1] - p.getJointState(robot_id, joint_ids[1])[0])]
         )
     
     p.stepSimulation()
