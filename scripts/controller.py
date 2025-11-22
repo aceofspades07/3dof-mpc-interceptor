@@ -13,8 +13,8 @@ class ArmParameters:
     m2: float = 0.8  # Mass of link 2 (kg)
     start_pos : np.ndarray = np.array([0, 0, 0.1]) # Start 0.1 meters in the air 
     start_orientation : np.ndarray = p.getQuaternionFromEuler([math.pi/2, 0, 0])
-    q_min: np.ndarray = np.array([0, 0])
-    q_max: np.ndarray = np.array([2*np.pi, 2*np.pi])
+    q_min: np.ndarray = np.array([-np.pi, -np.pi])
+    q_max: np.ndarray = np.array([np.pi, np.pi])
     dq_max: np.ndarray = np.array([2.0, 2.0])  # rad/s
     ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
 
@@ -42,15 +42,18 @@ class ArmDynamics:
 
         dist = np.sqrt(x**2 + z**2)
         # If target is OUTSIDE max reach, pull it in to the max radius
-        if dist > max_reach:
+        if dist + 1e-6 > max_reach:
             scale = max_reach / dist
             x = x * scale
             z = z * scale
-        # If target is INSIDE min reach (too close to itself), push it out
-        # elif dist < min_reach:
-        #     scale = min_reach / dist
-        #     x = x * scale
-        #     z = z * scale
+        #If target is INSIDE min reach (too close to itself), push it out
+        elif dist + 1e-6 < min_reach:
+            scale = min_reach / dist
+            x = x * scale
+            z = z * scale
+        
+        if z < base_height:
+            z = base_height  # Restrict to upper half-plane
         
         cos_q2 = (x**2 + z**2 - l1**2 - l2**2) / (2 * l1 * l2)
         cos_q2 = np.clip(cos_q2, -1.0, 1.0)  # Numerical safety
@@ -63,6 +66,8 @@ class ArmDynamics:
         k1 = l1 + l2 * cos_q2
         k2 = l2 * sin_q2
         q1 = np.arctan2(z, x) - np.arctan2(k2, k1)
+
+        q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
 
         return np.array([q1, q2])
     
