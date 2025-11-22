@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+venv/
+.env
+.DS_Store
+# Ignore Python cache and venv
+__pycache__/
+*.py[cod]
+venv/
+env/
+.env
+
+# Ignore C++ builds
+*.o
+*.so
+build/
+cmake-build-debug/
+bin/
+obj/
+lib/
+
+# Ignore ROS2/Colcon specific (common for robotics)
+install/
+log/
+
+# IDE settings
+.vscode/
+.idea/
