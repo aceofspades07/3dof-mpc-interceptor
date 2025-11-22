@@ -16,6 +16,60 @@ class ArmParameters:
     dq_max: np.ndarray = np.array([2.0, 2.0])  # rad/s
     ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
 
+class ArmDynamics:
+    def __init__(self, params: ArmParameters):
+        self.params = params
+
+    def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
+        l1, l2 = self.params.l1, self.params.l2
+        x = l1 * np.cos(q[0]) + l2 * np.cos(q[0] + q[1])
+        z = l1 * np.sin(q[0]) + l2 * np.sin(q[0] + q[1])
+        return np.array([x, z])
+    
+    def ik_solver(self, target_pos: np.ndarray) -> np.ndarray:
+        l1, l2 = self.params.l1, self.params.l2
+        max_reach = l1 + l2
+        min_reach = abs(l1 - l2)
+
+        
+        x, z = target_pos
+        dist = np.sqrt(x**2 + z**2)
+        # If target is OUTSIDE max reach, pull it in to the max radius
+        if dist > max_reach:
+            scale = max_reach / dist
+            x = x * scale
+            z = z * scale
+        # If target is INSIDE min reach (too close to itself), push it out
+        elif dist < min_reach:
+            scale = min_reach / dist
+            x = x * scale
+            z = z * scale
+        
+        cos_q2 = (x**2 + z**2 - l1**2 - l2**2) / (2 * l1 * l2)
+        cos_q2 = np.clip(cos_q2, -1.0, 1.0)  # Numerical safety
+
+        sin_q2 = np.sqrt(1 - cos_q2**2)
+        sin_q2 = np.clip(sin_q2, -1.0, 1.0)  # Numerical safety
+
+        q2 = np.arctan2(sin_q2, cos_q2)
+
+        k1 = l1 + l2 * cos_q2
+        k2 = l2 * sin_q2
+        q1 = np.arctan2(z, x) - np.arctan2(k2, k1)
+
+        # if q1 < 0:
+        #     q1 += 2 * np.pi
+
+        return np.array([q1, q2])
+    
+
+
+def ik_solve(target_pos: np.ndarray) -> np.ndarray:
+    params = ArmParameters()
+    dynamics = ArmDynamics(params)
+    return dynamics.ik_solver(target_pos)
+
+
 # 1. Connect to PyBullet
 p.connect(p.GUI)
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -60,21 +114,49 @@ for j in range(p.getNumJoints(robot_id)):
     if joint_type == p.JOINT_REVOLUTE:
         joint_ids.append(j)
         # Add a slider for this joint
-        param_ids.append(p.addUserDebugParameter(joint_name, -3.14, 3.14, 0))
+        #param_ids.append(p.addUserDebugParameter(joint_name, -3.14, 3.14, 0))
+
+slid_target_x = p.addUserDebugParameter("Target X", -2.0, 2.0, 1.0)
+slid_target_z = p.addUserDebugParameter("Target Z", -2.0, 2.0, 0.5)
 
 # 6. Simulation Loop
 while True:
     # Read slider values
+    """
     target_pos_1 = p.readUserDebugParameter(param_ids[0]) # Replace this with the calculated target from high-level controller
     target_pos_2 = p.readUserDebugParameter(param_ids[1]) # Replace this with the calculated target from high-level controller
+    """
+    tx = p.readUserDebugParameter(slid_target_x)
+    tz = p.readUserDebugParameter(slid_target_z)
+
+    ik_angles = ik_solve((tx,tz))
+
+    if ik_angles is not None:
+        target_pos_1 = ik_angles[0]
+        target_pos_2 = ik_angles[1]
+
+        p.setJointMotorControlArray(
+            robot_id,
+            joint_ids,
+            p.POSITION_CONTROL,
+            targetPositions=[target_pos_1, target_pos_2],
+            forces=[100, 100] # Torque limit
+        )
+    else:
+        print("Target position unreachable")
+        pass
+
+
 
     # Apply position control
+    
     p.setJointMotorControlArray(
         robot_id,
         joint_ids,
         p.POSITION_CONTROL,
         targetPositions=[target_pos_1, target_pos_2]
     )
+    
 
     # Apply velocity control
     """
@@ -90,4 +172,7 @@ while True:
 
     p.stepSimulation()
     time.sleep(1./240.)
+
+
+
 
