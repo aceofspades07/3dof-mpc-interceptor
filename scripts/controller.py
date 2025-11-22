@@ -28,7 +28,7 @@ planeId = p.loadURDF("plane.urdf")
 # The URDF joints rotate around the Z-axis (0,0,1).
 # To move in the World XZ plane, we rotate the robot -90 degrees around the X-axis.
 # Euler angles are [Roll, Pitch, Yaw]
-start_pos = [0, 0, 0.1] # Start 0.5 meters in the air 
+start_pos = [0, 0, 0.1] # Start 0.1 meters in the air 
 start_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0])
 
 urdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../urdf/2linkarm.urdf'))
