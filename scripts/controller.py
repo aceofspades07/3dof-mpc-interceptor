@@ -17,6 +17,8 @@ class ArmParameters:
     q_max: np.ndarray = np.array([np.pi, np.pi])
     dq_max: np.ndarray = np.array([2.0, 2.0])  # rad/s
     ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
+    torque_limits: np.ndarray = np.array([100.0, 100.0])  # Nm
+    control_mode: str = "POSITION"  # "POSITION" or "VELOCITY"
 
 class ArmDynamics:
     def __init__(self, params: ArmParameters):
@@ -72,6 +74,8 @@ class ArmDynamics:
         return np.array([q1, q2])
     
 
+arm_params = ArmParameters()
+
 # 1. Connect to PyBullet
 p.connect(p.GUI)
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -84,8 +88,8 @@ planeId = p.loadURDF("plane.urdf")
 # The URDF joints rotate around the Z-axis (0,0,1).
 # To move in the World XZ plane, we rotate the robot -90 degrees around the X-axis.
 # Euler angles are [Roll, Pitch, Yaw]
-start_pos = [0, 0, 0.1] # Start 0.1 meters in the air 
-start_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0])
+start_pos = arm_params.start_pos
+start_orientation = arm_params.start_orientation
 
 urdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../urdf/2linkarm.urdf'))
 if not os.path.exists(urdf_path):
@@ -118,8 +122,6 @@ for j in range(p.getNumJoints(robot_id)):
         # Add a slider for this joint
         #param_ids.append(p.addUserDebugParameter(joint_name, -3.14, 3.14, 0))
 
-
-arm_params = ArmParameters()
 max_reach = arm_params.l1 + arm_params.l2
 min_reach = abs(arm_params.l1 - arm_params.l2)
 slid_target_x = p.addUserDebugParameter("Target X", -1*max_reach, max_reach, max_reach/2)
@@ -132,49 +134,46 @@ while True:
     target_pos_1 = p.readUserDebugParameter(param_ids[0]) # Replace this with the calculated target from high-level controller
     target_pos_2 = p.readUserDebugParameter(param_ids[1]) # Replace this with the calculated target from high-level controller
     """
-    tx = p.readUserDebugParameter(slid_target_x)
-    tz = p.readUserDebugParameter(slid_target_z)
+    target_pos = p.readUserDebugParameter(slid_target_x) , p.readUserDebugParameter(slid_target_z) 
 
-    params = ArmParameters()
-    dynamics = ArmDynamics(params)
-    ik_angles =  dynamics.ik_solver((tx,tz))
+    dynamics = ArmDynamics(arm_params)
+    ik_angles =  dynamics.ik_solver(target_pos)
 
     if ik_angles is not None:
-        target_pos_1 = ik_angles[0]
-        target_pos_2 = ik_angles[1]
-
+        
         p.setJointMotorControlArray(
             robot_id,
             joint_ids,
             p.POSITION_CONTROL,
-            targetPositions=[target_pos_1, target_pos_2],
-            forces=[100, 100] # Torque limit
+            targetPositions=ik_angles,
+            forces=arm_params.torque_limits
         )
     else:
         print("Target position unreachable")
         pass
 
     # Apply position control
-    p.setJointMotorControlArray(
-        robot_id,
-        joint_ids,
-        p.POSITION_CONTROL,
-        targetPositions=[target_pos_1, target_pos_2]
-    )
+
+    if arm_params.control_mode == "POSITION":
+        p.setJointMotorControlArray(
+            robot_id,
+            joint_ids,
+            p.POSITION_CONTROL,
+            targetPositions=ik_angles
+        )
     
 
     # Apply velocity control
-    """
-    Kp = [5.0,5.0]  # Proportional gain
-    p.setJointMotorControlArray(
-        robot_id,
-        joint_ids,
-        p.VELOCITY_CONTROL,
-        targetVelocities=[Kp[0] * (target_pos_1 - p.getJointState(robot_id, joint_ids[0])[0]),
-                          Kp[1] * (target_pos_2 - p.getJointState(robot_id, joint_ids[1])[0])]
-    )
-    """
-
+    elif arm_params.control_mode == "VELOCITY":
+        Kp = [5.0,5.0]  # Proportional gain
+        p.setJointMotorControlArray(
+            robot_id,
+            joint_ids,
+            p.VELOCITY_CONTROL,
+            targetVelocities=[Kp[0] * (ik_angles[0] - p.getJointState(robot_id, joint_ids[0])[0]),
+                            Kp[1] * (ik_angles[1] - p.getJointState(robot_id, joint_ids[1])[0])]
+        )
+    
     p.stepSimulation()
     time.sleep(1./240.)
 
