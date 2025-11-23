@@ -195,12 +195,14 @@ while True:
     if time.time() - last_print_time >= 0.1:
         ee_pos = dynamics.forward_kinematics(np.array(current_angles))
         ee_pos[1] += arm_params.start_pos[2]
+        joint_speeds = [p.getJointState(robot_id, joint_id)[1] for joint_id in joint_ids]
         print("-----")
         print(f"Status: {'MOVING' if elapsed < duration else 'HOLDING'}")
         print(f"Elapsed time: {elapsed:.2f} s")
         print(f"Target position: {target_pos}")
         print(f"Current joint angles: {current_angles}")
         print(f"Current end-effector position: {ee_pos}")
+        print(f"Joint speeds: {joint_speeds}")
         last_print_time = time.time()
     
     time.sleep(1./240.)
