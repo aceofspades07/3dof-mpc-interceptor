@@ -18,7 +18,7 @@ class ArmParameters:
     dq_max: np.ndarray = np.array([2.0, 2.0])  # rad/s
     ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
     torque_limits: np.ndarray = np.array([100.0, 100.0])  # Nm
-    config : str = "ELBOW_DOWN"
+    config : str = "ELBOW_UP" # "ELBOW_UP" or "ELBOW_DOWN"
     control_mode: str = "POSITION"  # "POSITION" or "VELOCITY"
 
 class ArmDynamics:
@@ -71,11 +71,16 @@ class ArmDynamics:
         elif self.params.config == "ELBOW_DOWN":
             q2 = q2_mag # Elbow Down
 
+        cos_q2 = np.cos(q2)
+        sin_q2 = np.sin(q2)
+
         k1 = l1 + l2 * cos_q2
         k2 = l2 * sin_q2
         q1 = np.arctan2(z, x) - np.arctan2(k2, k1)
 
-        q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
+        # q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
+        # if q1 < 0:
+        #      q1 = 0
 
         return np.array([q1, q2])
     
@@ -165,6 +170,7 @@ while True:
             targetPositions=target_angles
         )
     
+    
 
     # Apply velocity control
     elif arm_params.control_mode == "VELOCITY":
@@ -176,7 +182,8 @@ while True:
             targetVelocities=[Kp[0] * (target_angles[0] - p.getJointState(robot_id, joint_ids[0])[0]),
                             Kp[1] * (target_angles[1] - p.getJointState(robot_id, joint_ids[1])[0])]
         )
-    
+
+    print(f"Current end-effector position: {dynamics.forward_kinematics(target_angles)}")
     p.stepSimulation()
     time.sleep(1./240.)
 
