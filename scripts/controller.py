@@ -77,10 +77,6 @@ class ArmDynamics:
         # do not let q1 go beyond 0 to pi
         q1 = np.clip(q1, 0, np.pi)
 
-        # q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
-        # if q1 < 0:
-        #     q1 = 0
-
         return np.array([q1, q2])
     
 
@@ -95,17 +91,14 @@ p.setGravity(0, 0, -9.81)
 planeId = p.loadURDF("plane.urdf")
 
 # 3. Define the Spawn Orientation
-# The URDF joints rotate around the Z-axis (0,0,1).
-# To move in the World XZ plane, we rotate the robot -90 degrees around the X-axis.
-# Euler angles are [Roll, Pitch, Yaw]
 start_pos = arm_params.start_pos
 start_orientation = arm_params.start_orientation
 
 urdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../urdf/2linkarm.urdf'))
 if not os.path.exists(urdf_path):
-		urdf_path = os.path.abspath(os.path.join(os.getcwd(), 'urdf/2linkarm.urdf'))
+        urdf_path = os.path.abspath(os.path.join(os.getcwd(), 'urdf/2linkarm.urdf'))
 if not os.path.exists(urdf_path):
-		raise FileNotFoundError(f"URDF file not found: {urdf_path}")
+        raise FileNotFoundError(f"URDF file not found: {urdf_path}")
 
 # 4. Load the Robot
 robot_id = p.loadURDF(
@@ -129,35 +122,41 @@ for j in range(p.getNumJoints(robot_id)):
     
     if joint_type == p.JOINT_REVOLUTE:
         joint_ids.append(j)
-        # Add a slider for this joint
-        #param_ids.append(p.addUserDebugParameter(joint_name, -3.14, 3.14, 0))
 
-max_reach = arm_params.l1 + arm_params.l2
-min_reach = abs(arm_params.l1 - arm_params.l2)
-slid_target_x = p.addUserDebugParameter("Target X", -1*max_reach, max_reach, 1.8)
-slid_target_z = p.addUserDebugParameter("Target Z", -1*max_reach, max_reach, 0.1)
+# Trajectory Definition
+start_point = np.array([0.632, 0.589])
+end_point   = np.array([-0.529, 1.345])
 
-# 6. Simulation Loop
-last_print_time = time.time()
-# Run forever (until user closes GUI / kills process)
+dynamics = ArmDynamics(arm_params)
 filtered_angles = np.zeros(2) 
 first_run = True
-while True:
-    # Read slider values
-    
-    target_pos = p.readUserDebugParameter(slid_target_x) , p.readUserDebugParameter(slid_target_z) 
+last_print_time = time.time()
 
-    dynamics = ArmDynamics(arm_params)
+start_time = time.time()
+duration = 1.0 
+
+print(f"Starting Cubic Trajectory: {start_point} -> {end_point}")
+
+prev_ee_pos = None 
+
+# 6. Simulation Loop
+while True:
+    now = time.time()
+    elapsed = now - start_time
+    
+    if elapsed < duration:
+        u = elapsed / duration
+        ratio = 3 * (u**2) - 2 * (u**3)
+        target_pos = start_point + (end_point - start_point) * ratio
+    else:
+        target_pos = end_point
+
     ik_solution = dynamics.ik_solver(target_pos)
 
-    target_angles = []
-
-    # target_angles[0] = [q1,q2] for ELBOW_UP, target_angles[1] = [q1,q2] for ELBOW_DOWN
-    
-    if target_pos[0] >= 0:
-        target_angles =  np.array([ik_solution[0][0] , ik_solution[1][0]])
-    else:
-        target_angles = np.array([ik_solution[0][1] , ik_solution[1][1]])
+    # FIX: Removed the if/else switch based on X.
+    # Index 0 corresponds to "Elbow Up" (Mountain shape).
+    # We use Index 0 for the entire path to ensure continuity.
+    target_angles = np.array([ik_solution[0][0] , ik_solution[1][0]])
 
     if first_run:
         filtered_angles = target_angles
@@ -166,63 +165,42 @@ while True:
     diff = np.abs(target_angles - filtered_angles)
     max_diff = np.max(diff)
 
-    if max_diff > 0.3: # 0.5 rad is a big jump (~30 degrees)
-        alpha = 0.01   # VERY Slow smoothing (glides through the transition)
+    if max_diff > 0.5: 
+        alpha = 0.02   
     else:
-        alpha = 0.6
+        alpha = 0.8
     
     filtered_angles = alpha * target_angles + (1 - alpha) * filtered_angles
 
-    if target_angles is not None:
-        
-        p.setJointMotorControlArray(
-            robot_id,
-            joint_ids,
-            p.POSITION_CONTROL,
-            targetPositions=filtered_angles,
-            forces=arm_params.torque_limits
-        )
-    else:
-        print("Target position unreachable")
-        pass
+    p.setJointMotorControlArray(
+        robot_id,
+        joint_ids,
+        p.POSITION_CONTROL,
+        targetPositions=filtered_angles,
+        forces=arm_params.torque_limits
+    )
 
-    # Apply position control
+    p.stepSimulation()
 
-    if arm_params.control_mode == "POSITION":
-        p.setJointMotorControlArray(
-            robot_id,
-            joint_ids,
-            p.POSITION_CONTROL,
-            targetPositions=target_angles
-        )
-    
-    
-
-    # Apply velocity control
-    elif arm_params.control_mode == "VELOCITY":
-        Kp = [5.0,5.0]  # Proportional gain
-        p.setJointMotorControlArray(
-            robot_id,
-            joint_ids,
-            p.VELOCITY_CONTROL,
-            targetVelocities=[Kp[0] * (target_angles[0] - p.getJointState(robot_id, joint_ids[0])[0]),
-                            Kp[1] * (target_angles[1] - p.getJointState(robot_id, joint_ids[1])[0])]
-        )
-
-    # Debugging
+    # Trace Logic
     current_angles = [p.getJointState(robot_id, joint_id)[0] for joint_id in joint_ids]
-    # Print debug info at 1 Hz to reduce console spam
-    if time.time() - last_print_time >= 0.3:
+    ee_pos_rel = dynamics.forward_kinematics(np.array(current_angles))
+    curr_ee_3d = [ee_pos_rel[0], 0, ee_pos_rel[1] + arm_params.start_pos[2]]
+
+    if prev_ee_pos is not None:
+        p.addUserDebugLine(prev_ee_pos, curr_ee_3d, lineColorRGB=[0, 1, 0], lineWidth=2, lifeTime=0)
+    
+    prev_ee_pos = curr_ee_3d
+
+    if time.time() - last_print_time >= 0.1:
         ee_pos = dynamics.forward_kinematics(np.array(current_angles))
+        ee_pos[1] += arm_params.start_pos[2]
         print("-----")
+        print(f"Status: {'MOVING' if elapsed < duration else 'HOLDING'}")
+        print(f"Elapsed time: {elapsed:.2f} s")
         print(f"Target position: {target_pos}")
         print(f"Current joint angles: {current_angles}")
         print(f"Current end-effector position: {ee_pos}")
         last_print_time = time.time()
     
-    p.stepSimulation()
     time.sleep(1./240.)
-
-
-
-
