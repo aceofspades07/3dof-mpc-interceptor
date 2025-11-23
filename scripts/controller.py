@@ -58,13 +58,6 @@ class ArmDynamics:
         if z < base_height:
             z = base_height  # Restrict to upper half-plane
         
-        config = self.params.config
-
-        if x < 0:
-            config = "ELBOW_DOWN"
-        elif x >= 0:
-            config = "ELBOW_UP"
-        
         cos_q2 = (x**2 + z**2 - l1**2 - l2**2) / (2 * l1 * l2)
         cos_q2 = np.clip(cos_q2, -1.0, 1.0)  # Numerical safety
 
@@ -72,11 +65,7 @@ class ArmDynamics:
         sin_q2 = np.clip(sin_q2, -1.0, 1.0)  # Numerical safety
 
         q2_mag = np.arctan2(sin_q2, cos_q2)
-
-        if config == "ELBOW_UP":
-            q2 = -q2_mag # Elbow Up
-        elif config == "ELBOW_DOWN":
-            q2 = q2_mag # Elbow Down
+        q2 = [-q2_mag, q2_mag]      
 
         cos_q2 = np.cos(q2)
         sin_q2 = np.sin(q2)
@@ -86,10 +75,7 @@ class ArmDynamics:
         q1 = np.arctan2(z, x) - np.arctan2(k2, k1)
 
         # do not let q1 go beyond 0 to pi
-        if q1 < 0:
-            q1 = 0
-        elif q1 > np.pi:
-            q1 = np.pi
+        q1 = np.clip(q1, 0, np.pi)
 
         # q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
         # if q1 < 0:
@@ -162,7 +148,16 @@ while True:
     target_pos = p.readUserDebugParameter(slid_target_x) , p.readUserDebugParameter(slid_target_z) 
 
     dynamics = ArmDynamics(arm_params)
-    target_angles =  dynamics.ik_solver(target_pos)
+    ik_solution = dynamics.ik_solver(target_pos)
+
+    target_angles = []
+
+    # target_angles[0] = [q1,q2] for ELBOW_UP, target_angles[1] = [q1,q2] for ELBOW_DOWN
+    
+    if target_pos[0] >= 0:
+        target_angles =  np.array([ik_solution[0][0] , ik_solution[1][0]])
+    else:
+        target_angles = np.array([ik_solution[0][1] , ik_solution[1][1]])
 
     if first_run:
         filtered_angles = target_angles
