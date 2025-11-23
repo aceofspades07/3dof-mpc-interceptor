@@ -58,6 +58,13 @@ class ArmDynamics:
         if z < base_height:
             z = base_height  # Restrict to upper half-plane
         
+        config = self.params.config
+
+        # if x < 0:
+        #     config = "ELBOW_DOWN"
+        # elif x > 0:
+        #     config = "ELBOW_UP"
+        
         cos_q2 = (x**2 + z**2 - l1**2 - l2**2) / (2 * l1 * l2)
         cos_q2 = np.clip(cos_q2, -1.0, 1.0)  # Numerical safety
 
@@ -66,9 +73,9 @@ class ArmDynamics:
 
         q2_mag = np.arctan2(sin_q2, cos_q2)
 
-        if self.params.config == "ELBOW_UP":
+        if config == "ELBOW_UP":
             q2 = -q2_mag # Elbow Up
-        elif self.params.config == "ELBOW_DOWN":
+        elif config == "ELBOW_DOWN":
             q2 = q2_mag # Elbow Down
 
         cos_q2 = np.cos(q2)
@@ -80,7 +87,7 @@ class ArmDynamics:
 
         # q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
         # if q1 < 0:
-        #      q1 = 0
+        #     q1 = 0
 
         return np.array([q1, q2])
     
@@ -135,10 +142,12 @@ for j in range(p.getNumJoints(robot_id)):
 
 max_reach = arm_params.l1 + arm_params.l2
 min_reach = abs(arm_params.l1 - arm_params.l2)
-slid_target_x = p.addUserDebugParameter("Target X", -1*max_reach, max_reach, max_reach/2)
-slid_target_z = p.addUserDebugParameter("Target Z", -1*max_reach, max_reach, max_reach/2)
+slid_target_x = p.addUserDebugParameter("Target X", -1*max_reach, max_reach, 1.8)
+slid_target_z = p.addUserDebugParameter("Target Z", -1*max_reach, max_reach, 0.1)
 
 # 6. Simulation Loop
+last_print_time = time.time()
+# Run forever (until user closes GUI / kills process)
 while True:
     # Read slider values
     
@@ -183,7 +192,17 @@ while True:
                             Kp[1] * (target_angles[1] - p.getJointState(robot_id, joint_ids[1])[0])]
         )
 
-    print(f"Current end-effector position: {dynamics.forward_kinematics(target_angles)}")
+    # Debugging
+    current_angles = [p.getJointState(robot_id, joint_id)[0] for joint_id in joint_ids]
+    # Print debug info at 1 Hz to reduce console spam
+    if time.time() - last_print_time >= 0.3:
+        ee_pos = dynamics.forward_kinematics(np.array(current_angles))
+        print("-----")
+        print(f"Target position: {target_pos}")
+        print(f"Current joint angles: {current_angles}")
+        print(f"Current end-effector position: {ee_pos}")
+        last_print_time = time.time()
+    
     p.stepSimulation()
     time.sleep(1./240.)
 
