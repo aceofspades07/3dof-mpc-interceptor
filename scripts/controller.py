@@ -60,10 +60,10 @@ class ArmDynamics:
         
         config = self.params.config
 
-        # if x < 0:
-        #     config = "ELBOW_DOWN"
-        # elif x > 0:
-        #     config = "ELBOW_UP"
+        if x < 0:
+            config = "ELBOW_DOWN"
+        elif x >= 0:
+            config = "ELBOW_UP"
         
         cos_q2 = (x**2 + z**2 - l1**2 - l2**2) / (2 * l1 * l2)
         cos_q2 = np.clip(cos_q2, -1.0, 1.0)  # Numerical safety
@@ -84,6 +84,12 @@ class ArmDynamics:
         k1 = l1 + l2 * cos_q2
         k2 = l2 * sin_q2
         q1 = np.arctan2(z, x) - np.arctan2(k2, k1)
+
+        # do not let q1 go beyond 0 to pi
+        if q1 < 0:
+            q1 = 0
+        elif q1 > np.pi:
+            q1 = np.pi
 
         # q1 = (q1 + np.pi) % (2 * np.pi) - np.pi # do not let q1 go beyond -pi to pi
         # if q1 < 0:
@@ -148,6 +154,8 @@ slid_target_z = p.addUserDebugParameter("Target Z", -1*max_reach, max_reach, 0.1
 # 6. Simulation Loop
 last_print_time = time.time()
 # Run forever (until user closes GUI / kills process)
+filtered_angles = np.zeros(2) 
+first_run = True
 while True:
     # Read slider values
     
@@ -156,13 +164,27 @@ while True:
     dynamics = ArmDynamics(arm_params)
     target_angles =  dynamics.ik_solver(target_pos)
 
+    if first_run:
+        filtered_angles = target_angles
+        first_run = False
+
+    diff = np.abs(target_angles - filtered_angles)
+    max_diff = np.max(diff)
+
+    if max_diff > 0.3: # 0.5 rad is a big jump (~30 degrees)
+        alpha = 0.01   # VERY Slow smoothing (glides through the transition)
+    else:
+        alpha = 0.6
+    
+    filtered_angles = alpha * target_angles + (1 - alpha) * filtered_angles
+
     if target_angles is not None:
         
         p.setJointMotorControlArray(
             robot_id,
             joint_ids,
             p.POSITION_CONTROL,
-            targetPositions=target_angles,
+            targetPositions=filtered_angles,
             forces=arm_params.torque_limits
         )
     else:
