@@ -1,0 +1,152 @@
+<robot name="3dof_planar_slider">
+
+  <!-- COLORS -->
+  <material name="black">
+    <color rgba="0 0 0 0.7"/>
+  </material>
+  <material name="white">
+    <color rgba="1 1 1 0.7"/>
+  </material>
+  <material name="grey">
+    <color rgba="0.5 0.5 0.5 1.0"/>
+  </material>
+
+  <!-- 1. STATIC RAIL (Root Link) -->
+  <link name="rail">
+    <visual>
+      <geometry>
+        <!-- 4 meter long track, 10cm wide, 2cm thick -->
+        <box size="4.0 0.1 0.02"/> 
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="grey"/>
+    </visual>
+    <inertial>
+      <!-- Mass 0 makes it static in PyBullet -->
+      <mass value="0.0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </inertial>
+  </link>
+
+  <!-- 2. SLIDER JOINT (Prismatic) -->
+  <joint name="slider_joint" type="prismatic">
+    <axis rpy="0 0 0" xyz="1 0 0"/> <!-- Moves along X axis -->
+    <parent link="rail"/>
+    <child link="cart"/>
+    <!-- Limits: +/- 2 meters (4m total stroke) -->
+    <limit lower="-2.0" upper="2.0" effort="1000.0" velocity="10.0"/>
+  </joint>
+
+  <!-- 3. SLIDER CART -->
+  <link name="cart">
+    <visual>
+      <geometry>
+        <box size="0.2 0.2 0.05"/>
+      </geometry>
+      <!-- Lifted 0.035 so it sits ON TOP of the rail (0.01 rail half-height + 0.025 cart half-height) -->
+      <origin rpy="0 0 0" xyz="0 0 0.035"/> 
+      <material name="white"/>
+    </visual>
+    <collision>
+       <geometry>
+        <box size="0.2 0.2 0.05"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0.035"/>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </inertial>
+  </link>
+
+  <!-- 4. SHOULDER JOINT (Revolute) -->
+  <joint name="baseHinge" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 1"/>
+    <parent link="cart"/>
+    <child link="arm1"/>
+    <!-- Offset Z: Rail half-height (0.01) + Cart thickness (0.05) = 0.06 -->
+    <origin rpy="0 0 0" xyz="0 0 0.06"/> 
+    <limit lower="0" upper="3.14159" effort="200.0" velocity="5.0"/>
+  </joint>
+
+  <!-- 5. ARM LINK 1 (1.0 Meter) -->
+  <link name="arm1">
+    <visual>
+      <geometry>
+        <box size="1.0 .05 .05"/>
+      </geometry>
+      <!-- Visual origin shifted by 0.5 so pivot is at the end -->
+      <origin rpy="0 0 0" xyz="0.5 0 0"/>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="1.0 .05 .05"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0.5 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.08" iyz="0" izz="0.08"/>
+      <origin rpy="0 0 0" xyz="0.5 0 0"/>
+    </inertial>
+  </link>
+
+  <!-- 6. ELBOW JOINT (Revolute) -->
+  <joint name="interArm" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 1"/>
+    <parent link="arm1"/>
+    <child link="arm2"/>
+    <!-- Offset by length of arm1 (1.0) -->
+    <origin rpy="0 0 0" xyz="1.0 0 0"/>
+    <limit lower="-3.14159" upper="3.14159" effort="200.0" velocity="5.0"/>
+  </joint>
+
+  <!-- 7. ARM LINK 2 (1.0 Meter) -->
+  <link name="arm2">
+    <visual>
+      <geometry>
+        <box size="1.0 .05 .05"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0.5 0 0"/>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="1.0 .05 .05"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0.5 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.08" iyz="0" izz="0.08"/>
+      <origin rpy="0 0 0" xyz="0.5 0 0"/>
+    </inertial>
+  </link>
+
+  <!-- 8. END EFFECTOR -->
+  <link name="endEffector">
+    <visual>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="white"/>
+    </visual>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </inertial>
+  </link>
+
+  <joint name="ee_joint" type="fixed">
+    <parent link="arm2"/>
+    <child link="endEffector"/>
+    <!-- Offset by length of arm2 (1.0) -->
+    <origin rpy="0 0 0" xyz="1.0 0 0"/>
+  </joint>
+
+</robot>
