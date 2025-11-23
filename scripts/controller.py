@@ -15,7 +15,7 @@ class ArmParameters:
     start_orientation : np.ndarray = p.getQuaternionFromEuler([math.pi/2, 0, 0])
     q_min: np.ndarray = np.array([-np.pi, -np.pi])
     q_max: np.ndarray = np.array([np.pi, np.pi])
-    dq_max: np.ndarray = np.array([2.0, 2.0])  # rad/s
+    dq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s
     ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
     torque_limits: np.ndarray = np.array([100.0, 100.0])  # Nm
     config : str = "ELBOW_UP" # "ELBOW_UP" or "ELBOW_DOWN"
@@ -172,13 +172,15 @@ while True:
     
     filtered_angles = alpha * target_angles + (1 - alpha) * filtered_angles
 
-    p.setJointMotorControlArray(
-        robot_id,
-        joint_ids,
-        p.POSITION_CONTROL,
-        targetPositions=filtered_angles,
-        forces=arm_params.torque_limits
-    )
+    for i, joint_id in enumerate(joint_ids):
+        p.setJointMotorControl2(
+            bodyUniqueId=robot_id,
+            jointIndex=joint_id,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=filtered_angles[i],
+            force=arm_params.torque_limits[i],    # Enforce Torque Limit
+            maxVelocity=arm_params.dq_max[i]      # Enforce Velocity Limit
+        )
 
     p.stepSimulation()
 
