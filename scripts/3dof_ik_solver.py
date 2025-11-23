@@ -1,195 +1,99 @@
 import numpy as np
-import pybullet as p
-import pybullet_data
-import time
-import math
-import os
 
-class ArmParameters:
-    # Parameters for 2-link planar arm
-    slider_length: float = 4.0  # Length of the prismatic slider (m)
-    l1: float = 1.0  # Length of link 1 (m)
-    l2: float = 1.0  # Length of link 2 (m)
-    m1: float = 1.0  # Mass of link 1 (kg)
-    m2: float = 0.8  # Mass of link 2 (kg)
-    start_pos : np.ndarray = np.array([0, 0, 0.1]) # Start 0.1 meters in the air 
-    start_orientation : np.ndarray = p.getQuaternionFromEuler([math.pi/2, 0, 0])
-    q_min: np.ndarray = np.array([-np.pi, -np.pi])
-    q_max: np.ndarray = np.array([np.pi, np.pi])
-    dq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s
-    ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
-    torque_limits: np.ndarray = np.array([100.0, 100.0])  # Nm
-    config : str = "ELBOW_UP" # "ELBOW_UP" or "ELBOW_DOWN"
-    control_mode: str = "POSITION"  # "POSITION" or "VELOCITY"
-
-class ArmDynamics:
-    def __init__(self, params: ArmParameters):
-        self.params = params
-
-    def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
-        pass
+class IKParameters:
+    # Physical Dimensions (Match your URDF)
+    l1: float = 1.0       # Length of Link 1
+    l2: float = 1.0       # Length of Link 2
+    base_height: float = 0.06  # Z-height of the shoulder relative to rail
     
-    def ik_solver(self, target_pos: np.ndarray) -> np.ndarray:
-        l1, l2 = self.params.l1, self.params.l2
-        max_reach = l1 + l2 + (self.params.slider_length)/2
-        min_reach = abs(l1 - l2)
-        base_height = self.params.start_pos[2]
-
-        x , z = target_pos
-
-        if z < base_height:
-            z = base_height  # Restrict to upper half-plane
-
-        dist = np.sqrt(x**2 + z**2)
-
-        if dist > max_reach - 1e-6:
-            scale = max_reach / dist
-            x = x * scale
-            z = z * scale
-
-        if dist < min_reach + 1e-6:
-            scale = min_reach / dist
-            x = x * scale
-            z = z * scale
-        
-        if z < base_height:
-            z = base_height  # Restrict to upper half-plane
-
-        q0 = []
-        q1 = []
-        q2 = []
-
-
-
-        return np.array([q0,q1,q2])
-
-        
-
-arm_params = ArmParameters()
-
-# 1. Connect to PyBullet
-p.connect(p.GUI)
-p.setAdditionalSearchPath(pybullet_data.getDataPath())
-
-# 2. Set up the environment
-p.setGravity(0, 0, -9.81)
-planeId = p.loadURDF("plane.urdf")
-
-# 3. Define the Spawn Orientation
-start_pos = arm_params.start_pos
-start_orientation = arm_params.start_orientation
-
-urdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../urdf/2linkarm.urdf'))
-if not os.path.exists(urdf_path):
-        urdf_path = os.path.abspath(os.path.join(os.getcwd(), 'urdf/2linkarm.urdf'))
-if not os.path.exists(urdf_path):
-        raise FileNotFoundError(f"URDF file not found: {urdf_path}")
-
-# 4. Load the Robot
-robot_id = p.loadURDF(
-    urdf_path,
-    basePosition=start_pos,
-    baseOrientation=start_orientation,
-    useFixedBase=True  # Keeps the base link pinned in space
-)
-
-# 5. Setup User Debug Parameters (Sliders) to test the XZ motion
-joint_ids = []
-param_ids = []
-
-print(p.getJointInfo(robot_id, 0))
-
-# We only care about the revolute joints (indices 0 and 1 based on your URDF)
-for j in range(p.getNumJoints(robot_id)):
-    info = p.getJointInfo(robot_id, j)
-    joint_name = info[1].decode("utf-8")
-    joint_type = info[2]
+    # Rail Constraints
+    rail_min: float = -2.0
+    rail_max: float = 2.0
     
-    if joint_type == p.JOINT_REVOLUTE:
-        joint_ids.append(j)
+    # Strategy: How far in front of the slider do we want to reach?
+    # Setting this to 1.0 means the slider tries to stay 1 meter behind the target X.
+    ideal_reach_x: float = 1.0 
 
-# Trajectory Definition
-start_point = np.array([0.632, 0.589])
-end_point   = np.array([-0.529, 1.345])
-
-dynamics = ArmDynamics(arm_params)
-filtered_angles = np.zeros(2) 
-first_run = True
-last_print_time = time.time()
-
-start_time = time.time()
-duration = 1.0 
-
-print(f"Starting Cubic Trajectory: {start_point} -> {end_point}")
-
-prev_ee_pos = None 
-
-# 6. Simulation Loop
-while True:
-    now = time.time()
-    elapsed = now - start_time
+def solve_3dof_ik(target_x, target_z, params=IKParameters()):
+    """
+    Calculates joint positions [slider, shoulder, elbow] for a given (x, z) target.
+    Resolves redundancy by attempting to keep the arm at 'ideal_reach_x'.
+    """
     
-    if elapsed < duration:
-        u = elapsed / duration
-        ratio = 3 * (u**2) - 2 * (u**3)
-        target_pos = start_point + (end_point - start_point) * ratio
-    else:
-        target_pos = end_point
-
-    ik_solution = dynamics.ik_solver(target_pos)
-
-    # FIX: Removed the if/else switch based on X.
-    # Index 0 corresponds to "Elbow Up" (Mountain shape).
-    # We use Index 0 for the entire path to ensure continuity.
-    target_angles = np.array([ik_solution[0][0] , ik_solution[1][0]])
-
-    if first_run:
-        filtered_angles = target_angles
-        first_run = False
-
-    diff = np.abs(target_angles - filtered_angles)
-    max_diff = np.max(diff)
-
-    if max_diff > 0.5: 
-        alpha = 0.02   
-    else:
-        alpha = 0.8
+    # --- STEP 1: RESOLVE REDUNDANCY (Calculate Slider) ---
+    # We want: Target_X = Slider_Pos + Ideal_Reach
+    # Therefore: Desired_Slider = Target_X - Ideal_Reach
+    desired_slider = target_x - params.ideal_reach_x
     
-    filtered_angles = alpha * target_angles + (1 - alpha) * filtered_angles
-
-    for i, joint_id in enumerate(joint_ids):
-        p.setJointMotorControl2(
-            bodyUniqueId=robot_id,
-            jointIndex=joint_id,
-            controlMode=p.POSITION_CONTROL,
-            targetPosition=filtered_angles[i],
-            force=arm_params.torque_limits[i],    # Enforce Torque Limit
-            maxVelocity=arm_params.dq_max[i]      # Enforce Velocity Limit
-        )
-
-    p.stepSimulation()
-
-    # Trace Logic
-    current_angles = [p.getJointState(robot_id, joint_id)[0] for joint_id in joint_ids]
-    ee_pos_rel = dynamics.forward_kinematics(np.array(current_angles))
-    curr_ee_3d = [ee_pos_rel[0], 0, ee_pos_rel[1] + arm_params.start_pos[2]]
-
-    if prev_ee_pos is not None:
-        p.addUserDebugLine(prev_ee_pos, curr_ee_3d, lineColorRGB=[0, 1, 0], lineWidth=2, lifeTime=0)
+    # Constraint: The slider cannot leave the rail.
+    # If target is too far left/right, the slider hits the limit and stops.
+    slider_pos = np.clip(desired_slider, params.rail_min, params.rail_max)
     
-    prev_ee_pos = curr_ee_3d
-
-    if time.time() - last_print_time >= 0.1:
-        ee_pos = dynamics.forward_kinematics(np.array(current_angles))
-        ee_pos[1] += arm_params.start_pos[2]
-        joint_speeds = [p.getJointState(robot_id, joint_id)[1] for joint_id in joint_ids]
-        print("-----")
-        print(f"Status: {'MOVING' if elapsed < duration else 'HOLDING'}")
-        print(f"Elapsed time: {elapsed:.2f} s")
-        print(f"Target position: {target_pos}")
-        print(f"Current joint angles: {current_angles}")
-        print(f"Current end-effector position: {ee_pos}")
-        print(f"Joint speeds: {joint_speeds}")
-        last_print_time = time.time()
+    # --- STEP 2: TRANSFORM TO SHOULDER FRAME ---
+    # Now that the base is fixed at 'slider_pos', calculate the target
+    # coordinates relative to the shoulder joint.
+    x_rel = target_x - slider_pos
+    z_rel = target_z - params.base_height
     
-    time.sleep(1./240.)
+    # --- STEP 3: STANDARD 2-LINK IK ---
+    
+    # A. Check Reachability
+    dist_sq = x_rel**2 + z_rel**2
+    dist = np.sqrt(dist_sq)
+    max_reach = params.l1 + params.l2
+    
+    # Safety: If target is out of reach, stretch arm towards it
+    if dist > max_reach:
+        scale = max_reach / dist
+        x_rel *= scale
+        z_rel *= scale
+    
+    # B. Calculate Elbow Angle (q2) using Law of Cosines
+    # D^2 = L1^2 + L2^2 - 2*L1*L2*cos(pi - q2)
+    # cos(q2) = (D^2 - L1^2 - L2^2) / (2*L1*L2)
+    cos_q2 = (x_rel**2 + z_rel**2 - params.l1**2 - params.l2**2) / (2 * params.l1 * params.l2)
+    
+    # Numerical safety clip (floating point errors can make cos_q2 > 1.0)
+    cos_q2 = np.clip(cos_q2, -1.0, 1.0)
+    
+    # Calculate q2 Magnitude (0 to PI)
+    q2_mag = np.arccos(cos_q2)
+    
+    # Configuration Choice: ELBOW UP
+    # For standard planar arms, negative q2 usually corresponds to "Elbow Up"
+    q2 = -q2_mag
+    
+    # C. Calculate Shoulder Angle (q1)
+    # q1 = angle_to_target - angle_inside_triangle
+    k1 = params.l1 + params.l2 * np.cos(q2)
+    k2 = params.l2 * np.sin(q2)
+    
+    q1 = np.arctan2(z_rel, x_rel) - np.arctan2(k2, k1)
+    
+    # Normalize q1 to [-PI, PI] to stay within standard limits
+    q1 = (q1 + np.pi) % (2 * np.pi) - np.pi
+    
+    return np.array([slider_pos, q1, q2])
+
+# --- Usage Example ---
+if __name__ == "__main__":
+    # Example 1: Target is comfortably in the middle
+    # Target X=1.5. Ideal reach is 1.0. Slider should go to 0.5.
+    tgt = (1.5, 0.5)
+    joints = solve_3dof_ik(tgt[0], tgt[1])
+    print(f"Target: {tgt}")
+    print(f"  Slider:   {joints[0]:.3f} m")
+    print(f"  Shoulder: {joints[1]:.3f} rad")
+    print(f"  Elbow:    {joints[2]:.3f} rad")
+
+    print("-" * 30)
+
+    # Example 2: Target is far to the left (beyond rail limit)
+    # Target X=-4.0. Slider limit is -2.0.
+    # Slider should stay at -2.0, and arm should reach backward.
+    tgt = (-4.0, 0.5)
+    joints = solve_3dof_ik(tgt[0], tgt[1])
+    print(f"Target: {tgt}")
+    print(f"  Slider:   {joints[0]:.3f} m (Hit Limit)")
+    print(f"  Shoulder: {joints[1]:.3f} rad")
+    print(f"  Elbow:    {joints[2]:.3f} rad")
