@@ -17,9 +17,9 @@ def main():
 	start_pos = [0, 0, 0.1]
 	start_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0])
 
-	urdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../urdf/2linkarm.urdf'))
+	urdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../urdf/3dof_planar_slider.urdf'))
 	if not os.path.exists(urdf_path):
-		urdf_path = os.path.abspath(os.path.join(os.getcwd(), 'urdf/2linkarm.urdf'))
+		urdf_path = os.path.abspath(os.path.join(os.getcwd(), 'urdf/3dof_planar_slider.urdf'))
 	if not os.path.exists(urdf_path):
 		raise FileNotFoundError(f"URDF file not found: {urdf_path}")
 
@@ -27,33 +27,34 @@ def main():
 		urdf_path,
 		basePosition=start_pos,
 		baseOrientation=start_orientation,
-		useFixedBase=True
+		useFixedBase=False
 	)
 
 	print(f"Spawned robot with ID: {robot_id}")
 
-	# Setup sliders for joint control
+	# Setup sliders for joint control (prismatic + revolute)
 	joint_ids = []
 	slider_ids = []
 	for j in range(p.getNumJoints(robot_id)):
 		info = p.getJointInfo(robot_id, j)
 		joint_type = info[2]
 		joint_name = info[1].decode("utf-8")
-		if joint_type == p.JOINT_REVOLUTE:
+		lower = info[8]
+		upper = info[9]
+		# Add slider for prismatic and revolute joints
+		if joint_type in [p.JOINT_PRISMATIC, p.JOINT_REVOLUTE]:
 			joint_ids.append(j)
-			lower = info[8]
-			upper = info[9]
 			slider_id = p.addUserDebugParameter(f"{joint_name}", lower, upper, 0.0)
 			slider_ids.append(slider_id)
 
 	# Simulation loop with slider control
 	while True:
-		target_angles = [p.readUserDebugParameter(slider_id) for slider_id in slider_ids]
+		target_positions = [p.readUserDebugParameter(slider_id) for slider_id in slider_ids]
 		p.setJointMotorControlArray(
 			robot_id,
 			joint_ids,
 			p.POSITION_CONTROL,
-			targetPositions=target_angles
+			targetPositions=target_positions
 		)
 		p.stepSimulation()
 		time.sleep(1./240.)
