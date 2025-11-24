@@ -9,7 +9,7 @@ class ArmParameters:
     # Parameters for 3-DOF PRR (Slider + 2-Link)
     l1: float = 1.0  # Link 1 Length
     l2: float = 1.0  # Link 2 Length
-    base_z_offset: float = 0.06 # Height of shoulder relative to rail
+    base_z_offset: float = 0.16 # Height of shoulder relative to rail
     
     start_pos : np.ndarray = np.array([0, 0, 0.1]) 
     start_orientation : np.ndarray = p.getQuaternionFromEuler([math.pi/2, 0, 0])
@@ -222,7 +222,7 @@ while True:
     # Map to World Frame for Drawing (X, 0, Z)
     # Note: base_z_offset was already added in forward_kinematics relative to rail.
     # We just need to add the Rail's World Z position.
-    curr_ee_3d = [ee_pos_rel[0], 0, ee_pos_rel[1] + arm_params.start_pos[2]]
+    curr_ee_3d = [ee_pos_rel[0], 0, ee_pos_rel[1]]
 
     if prev_ee_pos is not None:
         # Draw a persistent line segment
@@ -231,13 +231,24 @@ while True:
     prev_ee_pos = curr_ee_3d
 
     if time.time() - last_print_time >= 0.1:
+        # Joint speeds for all joints
         joint_speeds = [p.getJointState(robot_id, j)[1] for j in joint_ids]
+
+        # Current joint angles (slider, shoulder, elbow)
+        current_angles = current_states
+
+        # End-effector position in world frame (X, Y, Z)
+        ee_pos = np.array([curr_ee_3d[0],curr_ee_3d[2]])
+
+        # Print in the exact format requested
         print("-----")
         print(f"Status: {'MOVING' if elapsed < duration else 'HOLDING'}")
         print(f"Elapsed time: {elapsed:.2f} s")
-        print(f"Target: {target_pos}")
-        print(f"Current EE (Rel): {ee_pos_rel}")
-        print(f"Slider: {current_states[0]:.2f}")
+        print(f"Target position: {target_pos}")
+        print(f"Current end-effector position: {ee_pos}")
+        print(f"Current joint angles: {current_angles}")
+        print(f"Joint speeds: {joint_speeds}")
+
         last_print_time = time.time()
     
     time.sleep(1./240.)
