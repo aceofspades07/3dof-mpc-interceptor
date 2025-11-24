@@ -145,12 +145,7 @@ except KeyError as e:
 start_point = np.array([1.221, 1.568])
 end_point   = np.array([-0.954, 0.579])
 
-# Draw trajectory line (World Z is Up)
-p.addUserDebugLine(
-    [start_point[0], 0, start_point[1]], 
-    [end_point[0], 0, end_point[1]], 
-    lineColorRGB=[1, 0, 0], lineWidth=2, lifeTime=0
-)
+# Trajectory visualization removed (red line) — using target marker and green EE trail instead
 
 # Create a persistent visual marker (small sphere) to indicate the current target
 target_vis = p.createVisualShape(p.GEOM_SPHERE, radius=0.03, rgbaColor=[1, 0, 0, 1])
