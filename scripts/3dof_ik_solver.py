@@ -220,7 +220,7 @@ while True:
 
     time.sleep(1./240.)
 
-p.disconnect()
+
 
 # --- METRICS CALCULATION ---
 TARGET_TOLERANCE = 0.005 # 5mm tolerance zone
