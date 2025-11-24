@@ -72,6 +72,7 @@ class ArmDynamics:
             scale = max_reach / dist
             x_rel *= scale
             z_rel *= scale
+            print("Out of max reach.")
         
         # Prevent singularity
         if dist < 1e-6:
@@ -91,7 +92,7 @@ class ArmDynamics:
         q1 = np.arctan2(z_rel, x_rel) - np.arctan2(k2, k1)
         
         # Normalize
-        q1 = (q1 + np.pi) % (2 * np.pi) - np.pi
+        q1 = np.clip(q1 , 0 , np.pi)
         
         return np.array([slider_pos, q1, q2])
 
@@ -142,7 +143,7 @@ except KeyError as e:
 
 # --- TRAJECTORY DEFINITION ---
 start_point = np.array([1.221, 1.568])
-end_point   = np.array([-2.8, 0.579])
+end_point   = np.array([-0.954, 0.579])
 
 # Draw trajectory line (World Z is Up)
 p.addUserDebugLine(
@@ -150,6 +151,11 @@ p.addUserDebugLine(
     [end_point[0], 0, end_point[1]], 
     lineColorRGB=[1, 0, 0], lineWidth=2, lifeTime=0
 )
+
+# Create a persistent visual marker (small sphere) to indicate the current target
+target_vis = p.createVisualShape(p.GEOM_SPHERE, radius=0.03, rgbaColor=[1, 0, 0, 1])
+target_marker_id = p.createMultiBody(baseMass=0, baseVisualShapeIndex=target_vis,
+                                     basePosition=[end_point[0], 0, end_point[1]])
 
 dynamics = ArmDynamics(arm_params)
 
