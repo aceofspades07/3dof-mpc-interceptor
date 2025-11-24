@@ -283,16 +283,31 @@ def main():
         
         while time.time() - exec_start < T_opt:
             t_now = time.time() - exec_start
-            
+
             # Find index in trajectory
             idx_float = (t_now / T_opt) * params.N
             idx = int(np.clip(idx_float, 0, params.N-1))
-            
+
             # Get desired position and velocity for this moment
-            # Ideally interpolate, but nearest neighbor is fine for high N
             target_q = q_traj[:, idx+1]
             target_v = v_traj[:, idx+1]
-            
+
+            # Get current joint positions and velocities
+            curr_q = [p.getJointState(robot_id, j)[0] for j in joint_indices]
+            curr_v = [p.getJointState(robot_id, j)[1] for j in joint_indices]
+
+            # Get ball position
+            ball_pos, _ = p.getBasePositionAndOrientation(ball_id)
+
+            # Print all important variables for debugging
+            print("----- MPC Step -----")
+            print(f"Elapsed: {t_now:.3f} / {T_opt:.3f} s (idx {idx})")
+            print(f"Target joint pos: {target_q}")
+            print(f"Target joint vel: {target_v}")
+            print(f"Current joint pos: {curr_q}")
+            print(f"Current joint vel: {curr_v}")
+            print(f"Ball position: {ball_pos}")
+
             # Send Command
             for i, j_id in enumerate(joint_indices):
                 p.setJointMotorControl2(
@@ -302,7 +317,7 @@ def main():
                     force=params.torque_limits[i],
                     maxVelocity=params.dq_max[i]
                 )
-            
+
             p.stepSimulation()
             time.sleep(1./240.)
         
