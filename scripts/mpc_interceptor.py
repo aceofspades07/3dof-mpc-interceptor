@@ -5,35 +5,32 @@ import time
 import math
 import os
 import sys
+import matplotlib.pyplot as plt
 
-# Try importing CasADi. If missing, warn user.
+# Try importing CasADi. If missing, warn user
 try:
     import casadi as ca
 except ImportError:
     print("Error: CasADi not found. Please run 'pip install casadi'")
     sys.exit(1)
 
-# --- 1. CONFIGURATION ---
+# Configuration
 class ArmParameters:
     # Robot Dimensions
     l1: float = 1.0  
     l2: float = 1.0  
     base_z_offset: float = 0.06
-    
     start_pos = np.array([0, 0, 0.1])
     start_orientation = p.getQuaternionFromEuler([math.pi/2, 0, 0])
-    
-    # Constraints
     rail_min = -2.0
     rail_max = 2.0
     dq_max = np.array([2.0, 5.0, 5.0])    # Velocity Limits [Slider, Shldr, Elb]
     ddq_max = np.array([4.0, 10.0, 10.0]) # Acceleration Limits
     torque_limits = np.array([500.0, 200.0, 200.0])
     
-    # MPC Settings
     N = 20  # Number of discretization steps
 
-# --- 2. ESTIMATION MODULE ---
+# Estimation
 class TrajectoryEstimator:
     def __init__(self):
         self.history_t = []
@@ -46,43 +43,40 @@ class TrajectoryEstimator:
         self.history_z = []
         
     def add_observation(self, t, pos):
-        # Add artificial noise to simulate real-world sensor inaccuracy
+        # Add artificial noise 
         noise = np.random.normal(0, 0.005, size=3) # 5mm noise
-        noisy_pos = pos + noise
+        pos = pos + noise
         
         self.history_t.append(t)
-        self.history_x.append(noisy_pos[0])
-        self.history_z.append(noisy_pos[2]) # World Z is Up
-        
+        self.history_x.append(pos[0])
+        self.history_z.append(pos[2]) # World Z is Up
+
     def estimate_state(self):
-        """
-        Performs Least Squares Regression to find ballistic parameters.
-        Model X: x(t) = x0 + vx*t
-        Model Z: z(t) = z0 + vz*t - 0.5*g*t^2
-        """
-        if len(self.history_t) < 5: return None
+        # Performs least squares regression to find projectile parameters.
+        
+        if len(self.history_t) < 5: 
+            return None
         
         T = np.array(self.history_t)
         X = np.array(self.history_x)
         Z = np.array(self.history_z)
         
-        # Fit Linear X: [1, t] * [x0, vx]' = x
+        # Linear regression
         A_x = np.vstack([np.ones(len(T)), T]).T
         params_x, _, _, _ = np.linalg.lstsq(A_x, X, rcond=None)
-        x0_est, vx_est = params_x
+        x0_est, vx0_est = params_x
         
-        # Fit Quadratic Z: [1, t, t^2] * [z0, vz, -0.5g]' = z
+        # Quadratic regression
         A_z = np.vstack([np.ones(len(T)), T, T**2]).T
         params_z, _, _, _ = np.linalg.lstsq(A_z, Z, rcond=None)
-        z0_est, vz_est, acc_term = params_z
+        z0_est, vz0_est, acc_term = params_z
+        # Derived Gravity
+        g_est = -2 * acc_term
         
-        # Derived Gravity (sanity check, or just enforce 9.81)
-        # g_est = -2 * acc_term
-        
-        # Return estimated state at t=0
-        return np.array([x0_est, 0, z0_est, vx_est, 0, vz_est])
+        # Return estimates
+        return np.array([x0_est, 0, z0_est, vx0_est, 0, vz0_est])
 
-# --- 3. MPC SOLVER (The Paper's Implementation) ---
+# MPC Solver
 class TimeOptimalMPC:
     def __init__(self, params: ArmParameters):
         self.params = params
@@ -92,35 +86,33 @@ class TimeOptimalMPC:
     def build_solver(self):
         self.opti = ca.Opti()
         
-        # --- Variables ---
-        # T: Total Time to Catch (Optimization Variable!)
+        # Total Time to Catch
         self.T = self.opti.variable()
         
-        # States: [q0, q1, q2, v0, v1, v2] size (6, N+1)
+        # States [q0, q1, q2, v0, v1, v2] , size (6, N+1)
         self.X = self.opti.variable(6, self.params.N + 1)
         pos = self.X[:3, :]
         vel = self.X[3:, :]
         
-        # Controls: Accelerations [u0, u1, u2] size (3, N)
+        # Controls Accelerations [u0, u1, u2] , size (3, N)
         self.U = self.opti.variable(3, self.params.N)
         
         # Parameters
         self.P_robot_init = self.opti.parameter(6) # Current robot state
         self.P_ball_init = self.opti.parameter(6)  # Estimated ball state at t=0
         
-        # --- Cost Function ---
+        # Cost Function
         # Minimize Time T + minimal control effort
         J = self.T * 10.0 + ca.sumsqr(self.U) * 0.001
         self.opti.minimize(J)
         
-        # --- Constraints ---
-        # 1. Time Constraints (Must be positive, reasonable limit)
+        # time constraints
         self.opti.subject_to(self.T >= 0.1)
         self.opti.subject_to(self.T <= 2.0)
         
         dt = self.T / self.params.N
         
-        # 2. Dynamics (Trapezoidal Collocation / Euler)
+        # Dynamics (Trapezoidal collocation / Euler)
         for k in range(self.params.N):
             # Position Integration
             self.opti.subject_to(pos[:, k+1] == pos[:, k] + vel[:, k]*dt + 0.5*self.U[:, k]*dt**2)
@@ -184,6 +176,14 @@ class TimeOptimalMPC:
             # print(f"MPC Infeasible: {e}")
             return None, None, None
 
+def get_ee_pos(q, params):
+    """Forward kinematics helper for visualization/logging."""
+    slider_pos, q1, q2 = q
+    l1, l2 = params.l1, params.l2
+    x_rel = l1 * np.cos(q1) + l2 * np.cos(q1 + q2)
+    z_rel = l1 * np.sin(q1) + l2 * np.sin(q1 + q2)
+    return np.array([slider_pos + x_rel, z_rel + params.base_z_offset])
+
 # --- 4. MAIN SIMULATION LOOP ---
 def main():
     # Setup
@@ -203,7 +203,6 @@ def main():
         urdf_path = os.path.abspath(os.path.join(os.getcwd(), urdf_filename))
     if not os.path.exists(urdf_path):
         urdf_path = urdf_filename 
-
 
     robot_id = p.loadURDF(urdf_path, params.start_pos, params.start_orientation, useFixedBase=True)
     
@@ -227,6 +226,17 @@ def main():
     while True:
         input("Ready? Press Enter...")
         
+        # --- Data Logging Lists ---
+        log_time = []
+        log_robot_x = []
+        log_robot_z = []
+        log_ball_x = []
+        log_ball_z = []
+        log_error = []
+        log_slider = []
+        log_vel_shoulder = []
+        log_vel_elbow = []
+
         # 1. Spawn Ball
         if ball_id >= 0: p.removeBody(ball_id)
         start_x = np.random.uniform(3.5, 4.5)
@@ -281,32 +291,21 @@ def main():
         # We have the optimal path in q_traj (21 points). We interpolate.
         exec_start = time.time()
         
-        while time.time() - exec_start < T_opt:
+        while time.time() - exec_start < T_opt + 0.5: # Run a bit past catch time
             t_now = time.time() - exec_start
-
-            # Find index in trajectory
+            
+            # Find index in trajectory (Clamp if past T_opt)
             idx_float = (t_now / T_opt) * params.N
             idx = int(np.clip(idx_float, 0, params.N-1))
 
-            # Get desired position and velocity for this moment
-            target_q = q_traj[:, idx+1]
-            target_v = v_traj[:, idx+1]
-
-            # Get current joint positions and velocities
-            curr_q = [p.getJointState(robot_id, j)[0] for j in joint_indices]
-            curr_v = [p.getJointState(robot_id, j)[1] for j in joint_indices]
-
-            # Get ball position
-            ball_pos, _ = p.getBasePositionAndOrientation(ball_id)
-
-            # Print all important variables for debugging
-            print("----- MPC Step -----")
-            print(f"Elapsed: {t_now:.3f} / {T_opt:.3f} s (idx {idx})")
-            print(f"Target joint pos: {target_q}")
-            print(f"Target joint vel: {target_v}")
-            print(f"Current joint pos: {curr_q}")
-            print(f"Current joint vel: {curr_v}")
-            print(f"Ball position: {ball_pos}")
+            if t_now <= T_opt:
+                # Get desired position and velocity for this moment
+                target_q = q_traj[:, idx+1]
+                target_v = v_traj[:, idx+1]
+            else:
+                # Hold final position
+                 target_q = q_traj[:, -1]
+                 target_v = [0, 0, 0]
 
             # Send Command
             for i, j_id in enumerate(joint_indices):
@@ -319,9 +318,94 @@ def main():
                 )
 
             p.stepSimulation()
+
+            # --- Data Logging ---
+            # Get actual robot state
+            curr_q = [p.getJointState(robot_id, j)[0] for j in joint_indices]
+            curr_dq = [p.getJointState(robot_id, j)[1] for j in joint_indices]
+            ee_pos = get_ee_pos(curr_q, params)
+            
+            # Get actual ball state
+            ball_pos, _ = p.getBasePositionAndOrientation(ball_id)
+            
+            # Log
+            log_time.append(t_now)
+            log_robot_x.append(ee_pos[0])
+            log_robot_z.append(ee_pos[1])
+            log_ball_x.append(ball_pos[0])
+            log_ball_z.append(ball_pos[2])
+            
+            dist = np.linalg.norm(ee_pos - np.array([ball_pos[0], ball_pos[2]]))
+            log_error.append(dist)
+            
+            log_slider.append(curr_q[0])
+            log_vel_shoulder.append(curr_dq[1])
+            log_vel_elbow.append(curr_dq[2])
+
             time.sleep(1./240.)
         
         print("Catch Attempt Finished.")
+        
+        # --- Metrics & Graphs ---
+        min_error = np.min(log_error)
+        idx_min = np.argmin(log_error)
+        time_at_min = log_time[idx_min]
+        
+        print(f"\n--- FINAL METRICS ---")
+        print(f"Minimum Miss Distance: {min_error*1000:.2f} mm")
+        print(f"Time of Closest Approach: {time_at_min:.3f} s")
+        print(f"Planned Intercept Time: {T_opt:.3f} s")
+        print(f"Peak Shoulder Vel: {np.max(np.abs(log_vel_shoulder)):.2f} rad/s")
+        print(f"Peak Elbow Vel: {np.max(np.abs(log_vel_elbow)):.2f} rad/s")
+        
+        # Plotting
+        plt.figure(figsize=(12, 10))
+
+        # Graph 1: Trajectory Path (X-Z)
+        plt.subplot(2, 2, 1)
+        plt.plot(log_ball_x, log_ball_z, 'r--', label='Ball Path')
+        plt.plot(log_robot_x, log_robot_z, 'g-', label='Robot Path')
+        # Mark catch point
+        plt.scatter([log_ball_x[idx_min]], [log_ball_z[idx_min]], c='blue', marker='x', s=100, label='Intercept')
+        plt.title('Interception Trajectory')
+        plt.xlabel('X (m)')
+        plt.ylabel('Z (m)')
+        plt.legend()
+        plt.grid(True)
+
+        # Graph 2: Distance to Ball
+        plt.subplot(2, 2, 2)
+        plt.plot(log_time, np.array(log_error)*1000, 'b-')
+        plt.axvline(x=T_opt, color='r', linestyle='--', label=f'Planned T={T_opt:.2f}s')
+        plt.title('Distance to Ball vs Time')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Distance (mm)')
+        plt.legend()
+        plt.grid(True)
+
+        # Graph 3: Joint Velocities
+        plt.subplot(2, 2, 3)
+        plt.plot(log_time, log_vel_shoulder, label='Shoulder')
+        plt.plot(log_time, log_vel_elbow, label='Elbow')
+        plt.axhline(y=params.dq_max[1], color='r', linestyle=':', alpha=0.5)
+        plt.axhline(y=-params.dq_max[1], color='r', linestyle=':', alpha=0.5)
+        plt.title('Joint Velocities')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Velocity (rad/s)')
+        plt.legend()
+        plt.grid(True)
+
+        # Graph 4: Slider Position
+        plt.subplot(2, 2, 4)
+        plt.plot(log_time, log_slider, 'm-')
+        plt.title('Slider Position')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Position (m)')
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+        
         time.sleep(1.0)
 
 if __name__ == "__main__":
