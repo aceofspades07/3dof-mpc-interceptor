@@ -239,19 +239,18 @@ def main():
 
         # Spawn ball
         if ball_id >= 0: p.removeBody(ball_id)
-        start_x = np.random.uniform(-2.0, 2.0)
-        start_y = np.random.uniform(0.0, 0.0)
+        start_x = np.random.uniform(3.5, 4.5)
         start_z = np.random.uniform(1.0, 1.5)
-        vel_x = np.random.uniform(3.5, 4.5) # Throwing towards robot
-        vel_z = np.random.uniform(-3.0, -5.0)   # Lofted shot
-        vel_y = np.random.uniform(0.0, 0.0)   # Slight lateral
+        vel_x = np.random.uniform(-4.5, -3.5) # Throwing towards robot
+        vel_z = np.random.uniform(3.0, 5.0)   # Lofted shot
         
         vis_ball = p.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1,0,0,1])
         col_ball = p.createCollisionShape(p.GEOM_SPHERE, radius=0.04)
-        ball_id = p.createMultiBody(0.2, col_ball, vis_ball, [start_x, 0 , start_z])
-        p.resetBaseVelocity(ball_id, [vel_x, vel_y, vel_z])
+        ball_id = p.createMultiBody(0.2, col_ball, vis_ball, [start_x, 0, start_z])
+        p.resetBaseVelocity(ball_id, [vel_x, 0, vel_z])
         
-        print(f"Ball thrown. Init vel: [{vel_x:.2f}, {vel_y:.2f}, {vel_z:.2f}]")
+        print(f"Ball Thrown! Init Vel: [{vel_x:.2f}, {vel_z:.2f}]")
+        
         
         # Estimation Phase
         estimator.reset()
