@@ -119,13 +119,13 @@ class TimeOptimalMPC:
             # Velocity Integration
             self.opti.subject_to(vel[:, k+1] == vel[:, k] + self.U[:, k]*dt)
         
-        # 3. Initial Condition
+        # Initial condition
         self.opti.subject_to(self.X[:, 0] == self.P_robot_init)
-        
-        # 4. Physical Limits
-        # Slider Limits
+
+        # Physical limits
+        # Slider limits
         self.opti.subject_to(self.opti.bounded(self.params.rail_min, pos[0, :], self.params.rail_max))
-        # Velocity Limits
+        # Velocity limits
         for i in range(3):
             self.opti.subject_to(self.opti.bounded(-self.params.dq_max[i], vel[i, :], self.params.dq_max[i]))
             self.opti.subject_to(self.opti.bounded(-self.params.ddq_max[i], self.U[i, :], self.params.ddq_max[i]))
@@ -184,7 +184,7 @@ def get_ee_pos(q, params):
     z_rel = l1 * np.sin(q1) + l2 * np.sin(q1 + q2)
     return np.array([slider_pos + x_rel, z_rel + params.base_z_offset])
 
-# --- 4. MAIN SIMULATION LOOP ---
+
 def main():
     # Setup
     p.connect(p.GUI)
@@ -237,21 +237,23 @@ def main():
         log_vel_shoulder = []
         log_vel_elbow = []
 
-        # 1. Spawn Ball
+        # Spawn ball
         if ball_id >= 0: p.removeBody(ball_id)
-        start_x = np.random.uniform(3.5, 4.5)
+        start_x = np.random.uniform(-2.0, 2.0)
+        start_y = np.random.uniform(0.0, 0.0)
         start_z = np.random.uniform(1.0, 1.5)
-        vel_x = np.random.uniform(-4.5, -3.5) # Throwing towards robot
-        vel_z = np.random.uniform(3.0, 5.0)   # Lofted shot
+        vel_x = np.random.uniform(3.5, 4.5) # Throwing towards robot
+        vel_z = np.random.uniform(-3.0, -5.0)   # Lofted shot
+        vel_y = np.random.uniform(0.0, 0.0)   # Slight lateral
         
         vis_ball = p.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1,0,0,1])
         col_ball = p.createCollisionShape(p.GEOM_SPHERE, radius=0.04)
-        ball_id = p.createMultiBody(0.2, col_ball, vis_ball, [start_x, 0, start_z])
-        p.resetBaseVelocity(ball_id, [vel_x, 0, vel_z])
+        ball_id = p.createMultiBody(0.2, col_ball, vis_ball, [start_x, 0 , start_z])
+        p.resetBaseVelocity(ball_id, [vel_x, vel_y, vel_z])
         
-        print(f"Ball Thrown! Init Vel: [{vel_x:.2f}, {vel_z:.2f}]")
+        print(f"Ball thrown. Init vel: [{vel_x:.2f}, {vel_y:.2f}, {vel_z:.2f}]")
         
-        # 2. Estimation Phase (Collect Data for 0.1s)
+        # Estimation Phase
         estimator.reset()
         est_start = time.time()
         while time.time() - est_start < 0.1:
@@ -260,7 +262,8 @@ def main():
             estimator.add_observation(time.time() - est_start, pos)
             time.sleep(1./240.)
             
-        # 3. Fit Trajectory
+        # Fit trajectory
+        
         ball_state_est = estimator.estimate_state()
         if ball_state_est is None:
             print("Estimation Failed.")
@@ -268,15 +271,15 @@ def main():
             
         print(f"Est State: {ball_state_est}")
         
-        # 4. Solve MPC
+        # Solve MPC
         # Get current robot state
+        
         q_curr = [p.getJointState(robot_id, j)[0] for j in joint_indices]
         dq_curr = [p.getJointState(robot_id, j)[1] for j in joint_indices]
         robot_state = np.array(q_curr + dq_curr)
         
-        # Offset time: The ball has already moved 0.1s during estimation
-        # We need to project the ball state back to t=0 or shift MPC time.
-        # Simpler: Use current estimation as t=0 for MPC.
+        # The ball has already moved 0.1s during estimation
+        # We need to project the ball state back to t=0 or shift MPC time
         
         print("Solving MPC...")
         T_opt, q_traj, v_traj = mpc.solve(robot_state, ball_state_est)
@@ -286,17 +289,17 @@ def main():
             continue
             
         print(f"Catch possible in {T_opt:.3f} seconds!")
-        
-        # 5. Execute Trajectory
+
+        # Execute trajectory
         # We have the optimal path in q_traj (21 points). We interpolate.
         exec_start = time.time()
         
         while time.time() - exec_start < T_opt + 0.5: # Run a bit past catch time
             t_now = time.time() - exec_start
             
-            # Find index in trajectory (Clamp if past T_opt)
+            # Find index in trajectory 
             idx_float = (t_now / T_opt) * params.N
-            idx = int(np.clip(idx_float, 0, params.N-1))
+            idx = int(np.clip(idx_float, 0, params.N-1)) #clamp to T_opt
 
             if t_now <= T_opt:
                 # Get desired position and velocity for this moment
