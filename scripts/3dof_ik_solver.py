@@ -143,7 +143,7 @@ print(f"Starting Trajectory for Metrics Collection...")
 
 prev_ee_pos = None 
 
-# --- DATA LOGGING ARRAYS ---
+# DATA LOGGING ARRAYS
 log_time = []
 log_target_x = []
 log_target_z = []

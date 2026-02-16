@@ -1,25 +1,3 @@
-#!/usr/bin/env python3
-"""
-intercept_ball.py — Fixed-Time Receding Horizon MPC for 3-DOF PRR Arm Ball Interception
-========================================================================================
-
-A 3-DOF planar robot (Prismatic–Revolute–Revolute) intercepts a 3D ballistic
-projectile as it crosses the robot's XZ operational plane (Y = 0).
-
-Key design choices vs. the old "time-optimal" formulation:
-  • The intercept time T* is NOT an optimisation variable.
-    It is computed analytically from the ball's Y-axis trajectory:
-        ball_y(t) = y0 + vy*t  →  T_cross = -y0 / vy
-  • The MPC minimises control effort and penalises heavy revolute usage,
-    encouraging the prismatic slider to absorb gross X-motion.
-  • The horizon shrinks every RHC cycle (dt = T_remain / N) and the solver
-    is warm-started with the previous solution.
-  • A failsafe freezes the solver when T_remain < 0.1 s and plays the last
-    plan open-loop.
-
-Author : Copilot (refactored from project codebase)
-"""
-
 import pybullet as p
 import pybullet_data
 import numpy as np
@@ -34,9 +12,8 @@ except ImportError:
     print("CasADi is required.  pip install casadi")
     sys.exit(1)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 1.  CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION
+
 class ArmParams:
     """Physical constants and limits for the PRR arm."""
     l1          = 1.0       # link-1 length  (m)
