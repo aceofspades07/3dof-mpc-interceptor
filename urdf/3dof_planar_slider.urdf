@@ -68,7 +68,7 @@
     <child link="arm1"/>
     <!-- Offset Z: Rail half-height (0.01) + Cart thickness (0.05) = 0.06 -->
     <origin rpy="0 0 0" xyz="0 0 0.06"/> 
-    <limit lower="0" upper="3.14159" effort="200.0" velocity="5.0"/>
+    <limit lower="-6.28" upper="6.28" effort="200.0" velocity="5.0"/>
   </joint>
 
   <!-- 5. ARM LINK 1 (1.0 Meter) -->
@@ -126,18 +126,29 @@
     </inertial>
   </link>
 
-  <!-- 8. END EFFECTOR -->
+  <!-- 8. END EFFECTOR (UPDATED to DISK) -->
   <link name="endEffector">
     <visual>
       <geometry>
-        <sphere radius="0.02"/>
+        <!-- Radius 0.1m = 20cm diameter disk -->
+        <cylinder radius="0.1" length="0.02"/>
       </geometry>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <material name="white"/>
+      <!-- Rotated 90 deg around X so the flat face faces the XZ plane -->
+      <origin rpy="0 0 1.57079" xyz="0 0 0"/>
+      <material name="black"/>
     </visual>
+    
+    <!-- ADDED COLLISION SHAPE (Required for blocking!) -->
+    <collision>
+      <geometry>
+         <cylinder radius="0.25" length="0.02"/>
+      </geometry>
+      <origin rpy="1.57079 0 0" xyz="0 0 0"/>
+    </collision>
+
     <inertial>
-      <mass value="0.01"/>
-      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
       <origin rpy="0 0 0" xyz="0 0 0"/>
     </inertial>
   </link>

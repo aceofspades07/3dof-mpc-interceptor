@@ -18,6 +18,7 @@ cmake-build-debug/
 bin/
 obj/
 lib/
+docs/
 
 # Ignore ROS2/Colcon specific (common for robotics)
 install/

@@ -242,7 +242,7 @@ else:
     print("Target not reached within tolerance.")
 print(f"Final Error: {log_error[-1]*1000:.2f} mm")
 print(f"Peak Shoulder Vel: {np.max(np.abs(log_velocity_shoulder)):.2f} rad/s")
-
+'''
 # --- PLOTTING GRAPHS FOR REPORT ---
 plt.figure(figsize=(12, 10))
 
@@ -288,4 +288,4 @@ plt.ylabel('Position (m)')
 plt.grid(True)
 
 plt.tight_layout()
-plt.show()
+plt.show()'''
