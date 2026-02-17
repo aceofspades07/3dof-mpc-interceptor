@@ -4,6 +4,10 @@ A real-time projectile interception system using a 3-DOF planar robotic arm (Pri
 
 ![Interceptor](assets/interceptor6.webp)
 
+
+For an in-depth explanation of the math and the algorithms used in this project, please click on this link: [Technical Blog](https://aceofspades07.github.io/blog/interceptor.html). Do give it a read!
+
+
 ## How It Works
 
 1. **Trajectory Estimation** — Noisy ball observations are collected over ~0.15 s and fit via least-squares regression (linear in X/Y, quadratic in Z to account for gravity). From this, the exact time $T_{cross}$ when the ball crosses the arm's operational plane ($Y = 0$) is computed analytically.
