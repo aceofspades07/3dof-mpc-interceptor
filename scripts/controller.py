@@ -1,3 +1,8 @@
+"""
+2-Link Planar Arm Controller with PyBullet simulation.
+Implements position control with trajectory tracking and IK solving.
+"""
+
 import numpy as np
 import pybullet as p
 import pybullet_data
@@ -6,20 +11,19 @@ import math
 import os
 
 class ArmParameters:
-    # Parameters for 2-link planar arm
-    l1: float = 1.0  # Length of link 1 (m)
-    l2: float = 1.0  # Length of link 2 (m)
-    m1: float = 1.0  # Mass of link 1 (kg)
-    m2: float = 0.8  # Mass of link 2 (kg)
-    start_pos : np.ndarray = np.array([0, 0, 0.1]) # Start 0.1 meters in the air 
+    l1: float = 1.0
+    l2: float = 1.0
+    m1: float = 1.0
+    m2: float = 0.8
+    start_pos : np.ndarray = np.array([0, 0, 0.1])
     start_orientation : np.ndarray = p.getQuaternionFromEuler([math.pi/2, 0, 0])
     q_min: np.ndarray = np.array([-np.pi, -np.pi])
     q_max: np.ndarray = np.array([np.pi, np.pi])
-    dq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s
-    ddq_max: np.ndarray = np.array([5.0, 5.0])  # rad/s^2
-    torque_limits: np.ndarray = np.array([100.0, 100.0])  # Nm
-    config : str = "ELBOW_UP" # "ELBOW_UP" or "ELBOW_DOWN"
-    control_mode: str = "POSITION"  # "POSITION" or "VELOCITY"
+    dq_max: np.ndarray = np.array([5.0, 5.0])
+    ddq_max: np.ndarray = np.array([5.0, 5.0])
+    torque_limits: np.ndarray = np.array([100.0, 100.0])
+    config : str = "ELBOW_UP"
+    control_mode: str = "POSITION"
 
 class ArmDynamics:
     def __init__(self, params: ArmParameters):
@@ -40,29 +44,31 @@ class ArmDynamics:
 
         x, z = target_pos
 
+        # Restrict to upper half-plane
         if z < base_height:
-            z = base_height  # Restrict to upper half-plane
+            z = base_height
 
         dist = np.sqrt(x**2 + z**2)
-        # If target is OUTSIDE max reach, pull it in to the max radius
+        
+        # Clamp target to reachable workspace
         if dist + 1e-6 > max_reach:
             scale = max_reach / dist
             x = x * scale
             z = z * scale
-        #If target is INSIDE min reach (too close to itself), push it out
         elif dist + 1e-6 < min_reach:
             scale = min_reach / dist
             x = x * scale
             z = z * scale
         
         if z < base_height:
-            z = base_height  # Restrict to upper half-plane
+            z = base_height
         
+        # Compute elbow angle using law of cosines
         cos_q2 = (x**2 + z**2 - l1**2 - l2**2) / (2 * l1 * l2)
-        cos_q2 = np.clip(cos_q2, -1.0, 1.0)  # Numerical safety
+        cos_q2 = np.clip(cos_q2, -1.0, 1.0)
 
         sin_q2 = np.sqrt(1 - cos_q2**2)
-        sin_q2 = np.clip(sin_q2, -1.0, 1.0)  # Numerical safety
+        sin_q2 = np.clip(sin_q2, -1.0, 1.0)
 
         q2_mag = np.arctan2(sin_q2, cos_q2)
         q2 = [-q2_mag, q2_mag]      
@@ -70,11 +76,11 @@ class ArmDynamics:
         cos_q2 = np.cos(q2)
         sin_q2 = np.sin(q2)
 
+        # Compute shoulder angle
         k1 = l1 + l2 * cos_q2
         k2 = l2 * sin_q2
         q1 = np.arctan2(z, x) - np.arctan2(k2, k1)
 
-        # do not let q1 go beyond 0 to pi
         q1 = np.clip(q1, 0, np.pi)
 
         return np.array([q1, q2])
@@ -82,15 +88,14 @@ class ArmDynamics:
 
 arm_params = ArmParameters()
 
-# 1. Connect to PyBullet
+# Connect to PyBullet
 p.connect(p.GUI)
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
-# 2. Set up the environment
+# Set up the environment
 p.setGravity(0, 0, -9.81)
 planeId = p.loadURDF("plane.urdf")
 
-# 3. Define the Spawn Orientation
 start_pos = arm_params.start_pos
 start_orientation = arm_params.start_orientation
 
@@ -100,21 +105,20 @@ if not os.path.exists(urdf_path):
 if not os.path.exists(urdf_path):
         raise FileNotFoundError(f"URDF file not found: {urdf_path}")
 
-# 4. Load the Robot
+# Load the robot
 robot_id = p.loadURDF(
     urdf_path,
     basePosition=start_pos,
     baseOrientation=start_orientation,
-    useFixedBase=True  # Keeps the base link pinned in space
+    useFixedBase=True
 )
 
-# 5. Setup User Debug Parameters (Sliders) to test the XZ motion
+# Collect revolute joint indices
 joint_ids = []
 param_ids = []
 
 print(p.getJointInfo(robot_id, 0))
 
-# We only care about the revolute joints (indices 0 and 1 based on your URDF)
 for j in range(p.getNumJoints(robot_id)):
     info = p.getJointInfo(robot_id, j)
     joint_name = info[1].decode("utf-8")
@@ -123,7 +127,7 @@ for j in range(p.getNumJoints(robot_id)):
     if joint_type == p.JOINT_REVOLUTE:
         joint_ids.append(j)
 
-# Trajectory Definition
+# Define trajectory endpoints
 start_point = np.array([0.632, 0.589])
 end_point   = np.array([-0.529, 1.345])
 
@@ -139,11 +143,12 @@ print(f"Starting Cubic Trajectory: {start_point} -> {end_point}")
 
 prev_ee_pos = None 
 
-# 6. Simulation Loop
+# Simulation loop
 while True:
     now = time.time()
     elapsed = now - start_time
     
+    # Generate target position using cubic spline interpolation
     if elapsed < duration:
         u = elapsed / duration
         ratio = 3 * (u**2) - 2 * (u**3)
@@ -153,15 +158,14 @@ while True:
 
     ik_solution = dynamics.ik_solver(target_pos)
 
-    # FIX: Removed the if/else switch based on X.
-    # Index 0 corresponds to "Elbow Up" (Mountain shape).
-    # We use Index 0 for the entire path to ensure continuity.
+    # Use elbow up configuration for continuity
     target_angles = np.array([ik_solution[0][0] , ik_solution[1][0]])
 
     if first_run:
         filtered_angles = target_angles
         first_run = False
 
+    # Adaptive smoothing based on angle difference
     diff = np.abs(target_angles - filtered_angles)
     max_diff = np.max(diff)
 
@@ -172,19 +176,20 @@ while True:
     
     filtered_angles = alpha * target_angles + (1 - alpha) * filtered_angles
 
+    # Send commands to joints
     for i, joint_id in enumerate(joint_ids):
         p.setJointMotorControl2(
             bodyUniqueId=robot_id,
             jointIndex=joint_id,
             controlMode=p.POSITION_CONTROL,
             targetPosition=filtered_angles[i],
-            force=arm_params.torque_limits[i],    # Enforce Torque Limit
-            maxVelocity=arm_params.dq_max[i]      # Enforce Velocity Limit
+            force=arm_params.torque_limits[i],
+            maxVelocity=arm_params.dq_max[i]
         )
 
     p.stepSimulation()
 
-    # Trace Logic
+    # Draw end-effector trail
     current_angles = [p.getJointState(robot_id, joint_id)[0] for joint_id in joint_ids]
     ee_pos_rel = dynamics.forward_kinematics(np.array(current_angles))
     curr_ee_3d = [ee_pos_rel[0], 0, ee_pos_rel[1] + arm_params.start_pos[2]]
@@ -194,6 +199,7 @@ while True:
     
     prev_ee_pos = curr_ee_3d
 
+    # Print status periodically
     if time.time() - last_print_time >= 0.1:
         ee_pos = dynamics.forward_kinematics(np.array(current_angles))
         ee_pos[1] += arm_params.start_pos[2]

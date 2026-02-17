@@ -1,3 +1,8 @@
+"""
+Time-optimal MPC interceptor for 3-DOF planar arm with warm-start re-planning.
+Uses CasADi optimization with real-time trajectory updates during execution.
+"""
+
 import pybullet as p
 import pybullet_data
 import numpy as np
@@ -12,7 +17,9 @@ except ImportError:
     print("Error: CasADi not found. Run 'pip install casadi'")
     sys.exit(1)
 
+
 class ArmParameters:
+    """Physical parameters and limits for the 3-DOF arm."""
     l1: float = 1.0  
     l2: float = 1.0  
     base_z_offset: float = 0.06
@@ -27,7 +34,10 @@ class ArmParameters:
     torque_limits = np.array([500.0, 200.0, 200.0])
     N = 20
 
+
 class TrajectoryEstimator:
+    """Estimates ball trajectory from noisy observations using least squares."""
+    
     def __init__(self):
         self.history_t = []
         self.history_x = []
@@ -46,6 +56,7 @@ class TrajectoryEstimator:
         self.history_z.append(pos[2])
 
     def estimate_state(self):
+        """Returns estimated ball state [x, y, z, vx, vy, vz]."""
         if len(self.history_t) < 5: 
             return None
         
@@ -63,7 +74,10 @@ class TrajectoryEstimator:
         
         return np.array([x0_est, 0, z0_est, vx0_est, 0, vz0_est])
 
+
 class TimeOptimalMPC:
+    """MPC solver with warm-starting for real-time re-planning."""
+    
     def __init__(self, params: ArmParameters):
         self.params = params
         self.opti = None
@@ -72,6 +86,7 @@ class TimeOptimalMPC:
         self.build_solver()
 
     def build_solver(self):
+        """Constructs the CasADi optimization problem."""
         self.opti = ca.Opti()
         
         self.T = self.opti.variable()
@@ -91,17 +106,20 @@ class TimeOptimalMPC:
         
         dt = self.T / self.params.N
         
+        # Dynamics constraints
         for k in range(self.params.N):
             self.opti.subject_to(pos[:, k+1] == pos[:, k] + vel[:, k]*dt + 0.5*self.U[:, k]*dt**2)
             self.opti.subject_to(vel[:, k+1] == vel[:, k] + self.U[:, k]*dt)
         
         self.opti.subject_to(self.X[:, 0] == self.P_robot_init)
 
+        # Joint and velocity limits
         for i in range(3):
             self.opti.subject_to(self.opti.bounded(self.params.q_min[i], pos[i, :], self.params.q_max[i]))
             self.opti.subject_to(self.opti.bounded(-self.params.dq_max[i], vel[i, :], self.params.dq_max[i]))
             self.opti.subject_to(self.opti.bounded(-self.params.ddq_max[i], self.U[i, :], self.params.ddq_max[i]))
 
+        # Terminal constraint: end-effector matches ball position
         q_final = pos[:, -1]
         l1, l2 = self.params.l1, self.params.l2
         
@@ -122,10 +140,12 @@ class TimeOptimalMPC:
         self.opti.solver('ipopt', opts)
 
     def solve(self, robot_state, ball_state, T_guess=0.8):
+        """Solves MPC with warm-start from previous solution."""
         self.opti.set_value(self.P_robot_init, robot_state)
         self.opti.set_value(self.P_ball_init, ball_state)
         self.opti.set_initial(self.T, T_guess)
         
+        # Warm-start from previous solution if available
         if self.last_X is not None:
             self.opti.set_initial(self.X, self.last_X)
             self.opti.set_initial(self.U, self.last_U)
@@ -151,7 +171,9 @@ class TimeOptimalMPC:
             self.last_U = None
             return None, None, None
 
+
 def get_ee_pos(q, params):
+    """Computes end-effector position from joint angles."""
     slider_pos, q1, q2 = q
     l1, l2 = params.l1, params.l2
     x_rel = l1 * np.cos(q1) + l2 * np.cos(q1 + q2)
