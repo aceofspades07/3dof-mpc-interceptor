@@ -10,6 +10,7 @@ import time
 import math
 import os
 import sys
+import matplotlib.pyplot as plt
 
 try:
     import casadi as ca
@@ -159,17 +160,19 @@ class TimeOptimalMPC:
         try:
             sol = self.opti.solve()
             T_opt = sol.value(self.T)
-            pos_traj = sol.value(self.X)[:3, :]
-            vel_traj = sol.value(self.X)[3:, :]
+            X_sol = sol.value(self.X)
+            pos_traj = X_sol[:3, :]
+            vel_traj = X_sol[3:, :]
+            acc_traj = sol.value(self.U)
             
-            self.last_X = sol.value(self.X)
-            self.last_U = sol.value(self.U)
-            return T_opt, pos_traj, vel_traj
+            self.last_X = X_sol
+            self.last_U = acc_traj
+            return T_opt, pos_traj, vel_traj, acc_traj
             
         except Exception:
             self.last_X = None
             self.last_U = None
-            return None, None, None
+            return None, None, None, None
 
 
 def get_ee_pos(q, params):
@@ -179,6 +182,83 @@ def get_ee_pos(q, params):
     x_rel = l1 * np.cos(q1) + l2 * np.cos(q1 + q2)
     z_rel = l1 * np.sin(q1) + l2 * np.sin(q1 + q2)
     return np.array([slider_pos + x_rel, z_rel + params.base_z_offset])
+
+
+def save_throw_plots(out_dir, throw_idx, logs):
+    """Saves per-throw performance plots for MPC optimization variables and interception error."""
+    os.makedirs(out_dir, exist_ok=True)
+
+    t = np.array(logs["time"])
+    if t.size == 0:
+        return
+
+    q = np.array(logs["q"])
+    dq = np.array(logs["dq"])
+    u = np.array(logs["u"])
+    err = np.array(logs["error"])
+    mpc_t = np.array(logs["mpc_times"])
+    mpc_T = np.array(logs["mpc_T"])
+
+    # Graph 1: Optimization variable X (state trajectory, actual execution)
+    fig1, ax1 = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    ax1[0].plot(t, q[:, 0], label='q_slider [m]')
+    ax1[0].plot(t, q[:, 1], label='q_shoulder [rad]')
+    ax1[0].plot(t, q[:, 2], label='q_elbow [rad]')
+    ax1[0].set_ylabel('Joint Position')
+    ax1[0].set_title(f'Throw {throw_idx}: Optimization Variable X (Positions)')
+    ax1[0].grid(True)
+    ax1[0].legend()
+
+    ax1[1].plot(t, dq[:, 0], label='dq_slider [m/s]')
+    ax1[1].plot(t, dq[:, 1], label='dq_shoulder [rad/s]')
+    ax1[1].plot(t, dq[:, 2], label='dq_elbow [rad/s]')
+    ax1[1].set_xlabel('Time [s]')
+    ax1[1].set_ylabel('Joint Velocity')
+    ax1[1].set_title('Optimization Variable X (Velocities)')
+    ax1[1].grid(True)
+    ax1[1].legend()
+    fig1.tight_layout()
+    fig1.savefig(os.path.join(out_dir, f'throw_{throw_idx:03d}_X_state.png'), dpi=150)
+    plt.close(fig1)
+
+    # Graph 2: Optimization variable U (applied commanded accelerations)
+    fig2, ax2 = plt.subplots(figsize=(10, 4.5))
+    ax2.plot(t, u[:, 0], label='u_slider [m/s²]')
+    ax2.plot(t, u[:, 1], label='u_shoulder [rad/s²]')
+    ax2.plot(t, u[:, 2], label='u_elbow [rad/s²]')
+    ax2.set_xlabel('Time [s]')
+    ax2.set_ylabel('Joint Acceleration Command')
+    ax2.set_title(f'Throw {throw_idx}: Optimization Variable U')
+    ax2.grid(True)
+    ax2.legend()
+    fig2.tight_layout()
+    fig2.savefig(os.path.join(out_dir, f'throw_{throw_idx:03d}_U_control.png'), dpi=150)
+    plt.close(fig2)
+
+    # Graph 3: Optimization variable T (optimized horizon over re-solves)
+    fig3, ax3 = plt.subplots(figsize=(10, 4.5))
+    if mpc_t.size > 0:
+        ax3.plot(mpc_t, mpc_T, marker='o', label='Optimized T')
+    ax3.set_xlabel('Simulation Time [s]')
+    ax3.set_ylabel('Optimized Interception Time T [s]')
+    ax3.set_title(f'Throw {throw_idx}: Optimization Variable T Across MPC Re-solves')
+    ax3.grid(True)
+    ax3.legend()
+    fig3.tight_layout()
+    fig3.savefig(os.path.join(out_dir, f'throw_{throw_idx:03d}_T_horizon.png'), dpi=150)
+    plt.close(fig3)
+
+    # Graph 4: End-effector to ball distance
+    fig4, ax4 = plt.subplots(figsize=(10, 4.5))
+    ax4.plot(t, err * 1000.0, color='crimson', label='Miss Distance')
+    ax4.set_xlabel('Time [s]')
+    ax4.set_ylabel('Distance [mm]')
+    ax4.set_title(f'Throw {throw_idx}: End-Effector Distance to Ball')
+    ax4.grid(True)
+    ax4.legend()
+    fig4.tight_layout()
+    fig4.savefig(os.path.join(out_dir, f'throw_{throw_idx:03d}_distance.png'), dpi=150)
+    plt.close(fig4)
 
 def main():
     p.connect(p.GUI)
@@ -211,10 +291,13 @@ def main():
     print("========================================")
     print("   SIMULATION STARTED")
     print("========================================")
+    plots_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../docs/mpc_throw_plots'))
+    throw_counter = 0
     
     ball_id = -1
     
     while True:
+        throw_counter += 1
         print("\nPhysics running... Press [SPACE] to throw the ball.")
         
         # Non-blocking wait loop
@@ -242,11 +325,12 @@ def main():
         mpc.last_U = None
         
         log_time = []
-        log_robot_x = []
-        log_robot_z = []
-        log_ball_x = []
-        log_ball_z = []
         log_error = []
+        log_q = []
+        log_dq = []
+        log_u = []
+        log_mpc_times = []
+        log_mpc_T = []
         
         if ball_id >= 0: p.removeBody(ball_id)
         start_x = np.random.uniform(3.5, 4.5)
@@ -278,7 +362,7 @@ def main():
         dq_curr = [p.getJointState(robot_id, j)[1] for j in joint_indices]
         robot_state = np.array(q_curr + dq_curr)
         
-        T_opt, q_traj, v_traj = mpc.solve(robot_state, ball_state_est)
+        T_opt, q_traj, v_traj, u_traj = mpc.solve(robot_state, ball_state_est)
         
         if T_opt is None:
             print("MPC Failed: Target Unreachable. Nudging elbow joint...")
@@ -305,7 +389,10 @@ def main():
         T_remain = T_opt 
         current_q_traj = q_traj
         current_v_traj = v_traj
+        current_u_traj = u_traj
         last_mpc_time = 0.0
+        log_mpc_times.append(0.0)
+        log_mpc_T.append(T_opt)
         
         while T_remain > 0.01:
             if t_now >= next_mpc_time and T_remain > 0.15:
@@ -317,13 +404,16 @@ def main():
                 b_vel, _ = p.getBaseVelocity(ball_id)
                 ball_state_live = np.array([b_pos[0], 0, b_pos[2], b_vel[0], 0, b_vel[2]])
                 
-                new_T, new_q, new_v = mpc.solve(robot_state, ball_state_live, T_guess=T_remain)
+                new_T, new_q, new_v, new_u = mpc.solve(robot_state, ball_state_live, T_guess=T_remain)
                 
                 if new_T is not None:
                     T_remain = new_T
                     current_q_traj = new_q
                     current_v_traj = new_v
+                    current_u_traj = new_u
                     last_mpc_time = t_now
+                    log_mpc_times.append(t_now)
+                    log_mpc_T.append(new_T)
                 
                 next_mpc_time += mpc_interval
 
@@ -334,6 +424,7 @@ def main():
                 
                 target_q = current_q_traj[:, idx+1] if idx+1 <= params.N else current_q_traj[:, -1]
                 target_v = current_v_traj[:, idx+1] if idx+1 <= params.N else [0, 0, 0]
+                target_u = current_u_traj[:, idx] if current_u_traj is not None else np.zeros(3)
                 
                 for i, j_id in enumerate(joint_indices):
                     p.setJointMotorControl2(
@@ -347,11 +438,15 @@ def main():
             p.stepSimulation()
             
             curr_q = [p.getJointState(robot_id, j)[0] for j in joint_indices]
+            curr_dq = [p.getJointState(robot_id, j)[1] for j in joint_indices]
             ee_pos = get_ee_pos(curr_q, params)
             ball_pos, _ = p.getBasePositionAndOrientation(ball_id)
             
             log_time.append(t_now)
             log_error.append(np.linalg.norm(ee_pos - np.array([ball_pos[0], ball_pos[2]])))
+            log_q.append(curr_q)
+            log_dq.append(curr_dq)
+            log_u.append(target_u if current_q_traj is not None else np.zeros(3))
 
             time.sleep(sim_dt)
             t_now += sim_dt
@@ -362,6 +457,21 @@ def main():
         if len(log_error) > 0:
             min_error = np.min(log_error)
             print(f"Minimum Miss Distance: {min_error*1000:.2f} mm")
+
+        save_throw_plots(
+            plots_dir,
+            throw_counter,
+            {
+                "time": log_time,
+                "q": log_q,
+                "dq": log_dq,
+                "u": log_u,
+                "error": log_error,
+                "mpc_times": log_mpc_times,
+                "mpc_T": log_mpc_T,
+            },
+        )
+        print(f"Saved performance graphs to: {plots_dir}")
 
 if __name__ == "__main__":
     main()
